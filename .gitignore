@@ -16,3 +16,7 @@ maps/*
 
 # macOS
 .DS_Store
+
+# Recorded datasets (may contain images of your home)
+datasets/
+.venv-hf/

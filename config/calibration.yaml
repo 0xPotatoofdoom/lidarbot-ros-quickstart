@@ -1,0 +1,15 @@
+# Odometry scale corrections applied by tools/odom_calibrator.py before the EKF.
+# true motion / reported motion. Measure with:
+#   ./record run calib-angular ./ros python3 /work/tools/calibrate.py angular 2
+#   ./record run calib-linear  ./ros python3 /work/tools/calibrate.py linear 1.0
+# 1.0 = no correction. Values outside 0.5-2.0 are rejected.
+#
+# Measured 2026-11-11 on hardwood. Rotation: against lidar scan alignment (2 x 720 deg
+# turns each way; unaffected by lidar range errors). Distance: against a tape measure,
+# because the lidar over-reads range differences by about 3% (1.030 +- 0.007).
+odom_calibrator:
+  ros__parameters:
+    linear_scale: 0.982          # tape: 39.0 in out and back; /odom_raw pose 1.010, 1.009 m
+    angular_scale_left: 0.997    # CCW, /odom_raw pose: 0.9971
+    angular_scale_right: 0.996   # CW,  /odom_raw pose: 0.9961
+    imu_yaw_scale: 1.001         # /imu yaw over 4 runs: 1.0019, 1.0006, 1.0006, 1.0007

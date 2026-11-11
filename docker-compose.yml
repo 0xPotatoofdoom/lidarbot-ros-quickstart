@@ -16,6 +16,8 @@ services:
     volumes:
       - ./maps:/root/map
       - ./tools:/work/tools
+      - ./tests:/work/tests
+      - ./datasets:/root/datasets
       # config/slam_toolbox.yaml replaces Yahboom's params via a symlink in the image.
       - ./config:/work/config:ro
       - ./config/robot_info.json:/root/microros_ws/.system_cfg/robot_info.json

@@ -54,15 +54,17 @@ Open Foxglove, connect to `ws://localhost:8765`, and add a 3D panel for `/scan` 
 4. [First drive: Foxglove, teleop, scripted moves](docs/04-first-drive.md)
 5. [Mapping with slam_toolbox](docs/05-mapping.md)
 6. [Camera and pan/tilt](docs/06-camera.md)
-7. [Troubleshooting and known issues](docs/troubleshooting.md)
+7. [Calibrating odometry](docs/07-calibration.md)
+8. [Recording datasets](docs/08-recording.md)
+9. [Troubleshooting and known issues](docs/troubleshooting.md)
 
 ## Status
 
 Tested on an M3 Pro Mac (macOS 26, Docker Desktop) with the Superior kit
 (`CAR_TYPE=ptz`) and firmware 1.1.0. Other kits (`no_ptz`, `basic_car`) and other
 hosts (Intel Macs, Linux, Windows) should work with small changes but haven't been tried.
-Odometry under-reports rotation by about 6-12% compared with the lidar, and has not
-been calibrated yet.
+Odometry is calibrated against the lidar to within about 0.5% for distance and 0.05%
+for heading (see [calibration](docs/07-calibration.md)).
 
 ## License
 

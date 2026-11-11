@@ -37,6 +37,11 @@ BLIND_CLEARANCE = 0.6    # m
 LASER_X = -0.028         # laser offset behind base_footprint (m)
 RATE = 20.0
 TIMEOUT_FACTOR = 3.0     # give up after 3x the nominal duration
+# The robot keeps moving briefly after the stop command (Wi-Fi latency plus motor
+# run-down). Measured 2026-11-11 on hardwood: ~18 mm after a 1 m drive and ~4.6 deg
+# after a turn, plus up to one 20 Hz control tick. Stopping this much early lands on target.
+LINEAR_COAST = 0.022                 # m
+ANGULAR_COAST = math.radians(4.0)    # rad; varies 3.0-4.6 deg run to run
 
 
 def yaw_of(msg: Odometry) -> float:
@@ -127,8 +132,9 @@ class Mover(Node):
             rclpy.spin_once(self, timeout_sec=1.0 / RATE)
             p = self.odom.pose.pose.position
             done = math.hypot(p.x - p0.x, p.y - p0.y)
-            if done >= abs(dist):
-                return f"moved {done:.2f} m"
+            if done >= abs(dist) - LINEAR_COAST:
+                self.stop()
+                return f"moved {done:.3f} m (+ coast)"
             c = self.clearance(heading)
             if c < STOP_DIST:
                 self.stop()
@@ -150,8 +156,9 @@ class Mover(Node):
             turned += wrap(y - last)
             last = y
             remaining = abs(target) - abs(turned)
-            if remaining <= math.radians(1.5):
-                return f"rotated {math.degrees(turned):.1f} deg"
+            if remaining <= ANGULAR_COAST:
+                self.stop()
+                return f"rotated {math.degrees(turned):.1f} deg (+ coast)"
             self.send(wz=speed if remaining > math.radians(15) else speed * 0.5)
         self.stop()
         return f"timed out after {math.degrees(turned):.1f} deg"

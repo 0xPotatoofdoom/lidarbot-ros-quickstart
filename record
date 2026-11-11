@@ -1,0 +1,92 @@
+#!/bin/bash
+# Record robot data to datasets/raw/<timestamp>_<label>/ (MCAP rosbag + metadata).
+#   ./record start <label> ["task description"]   start recording in the background
+#   ./record stop                                 stop the current recording
+#   ./record run <label> <command...>             record while a command runs, saving its output
+#   ./record list                                 list recordings
+# Recordings stay on this Mac (datasets/ is git-ignored) until you sync or publish them.
+set -euo pipefail
+cd "$(dirname "$0")"
+export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+
+TOPICS=(/scan /odom /odom_raw /odom_cal /imu /imu_cal /cmd_vel /tf /tf_static
+        /joint_states /robot_description /ptz_angle /camera/camera_info
+        /camera/image_raw/compressed /map /map_metadata /diagnostics)
+STATE=datasets/.current
+
+usage() { sed -n 2,7p "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+
+valid_label() {
+  [[ "$1" =~ ^[a-z0-9][a-z0-9_-]{0,47}$ ]] || {
+    echo "label must be lowercase letters, digits, - or _ (max 48 chars): $1" >&2; exit 1; }
+}
+
+write_metadata() {  # dir label task
+  local dir=$1 label=$2 task=$3
+  .venv/bin/python - "$dir" "$label" "$task" <<'EOF'
+import json, subprocess, sys, datetime, pathlib
+d, label, task = pathlib.Path(sys.argv[1]), sys.argv[2], sys.argv[3]
+def sh(*cmd):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, check=True).stdout.strip()
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return None
+meta = {
+    "label": label,
+    "task": task,
+    "started_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+    "robot": "Yahboom MicroROS V2",
+    "car_type": sh("docker", "exec", "lidarbot", "printenv", "CAR_TYPE"),
+    "git_commit": sh("git", "rev-parse", "--short", "HEAD"),
+    "git_dirty": bool(sh("git", "status", "--porcelain")),
+    "calibration": pathlib.Path("config/calibration.yaml").read_text(),
+}
+(d / "metadata.json").write_text(json.dumps(meta, indent=2) + "\n")
+EOF
+}
+
+start() {  # label task
+  local label=$1 task=${2:-}
+  valid_label "$label"
+  if [ -f "$STATE" ]; then echo "already recording: $(cat "$STATE")  (./record stop)" >&2; exit 1; fi
+  local name; name="$(date -u +%Y%m%dT%H%M%SZ)_$label"
+  local dir="datasets/raw/$name"
+  mkdir -p "$dir"
+  write_metadata "$dir" "$label" "$task"
+  # rosbag2 creates the bag directory itself, so it gets a subdirectory.
+  ./ros -d bash -c "ros2 bag record -s mcap --include-hidden-topics -o /root/datasets/raw/$name/bag ${TOPICS[*]} > /root/datasets/raw/$name/record.log 2>&1"
+  echo "$name" > "$STATE"
+  sleep 2
+  echo "recording $dir"
+}
+
+stop() {
+  if [ ! -f "$STATE" ]; then echo "not recording" >&2; exit 1; fi
+  local name; name=$(cat "$STATE")
+  docker exec lidarbot pkill -INT -f "ros2 bag record" || true
+  for _ in $(seq 20); do
+    docker exec lidarbot pgrep -f "ros2 bag record" >/dev/null || break
+    sleep 0.5
+  done
+  rm -f "$STATE"
+  echo "stopped: datasets/raw/$name ($(du -sh "datasets/raw/$name" | cut -f1))"
+}
+
+case "${1:-}" in
+  start) [ $# -ge 2 ] || usage; start "$2" "${3:-}" ;;
+  stop) stop ;;
+  run)
+    [ $# -ge 3 ] || usage
+    label=$2; shift 2
+    start "$label" "$*"
+    name=$(cat "$STATE")
+    set +e
+    "$@" 2>&1 | tee "datasets/raw/$name/output.txt"
+    status=${PIPESTATUS[0]}
+    set -e
+    stop
+    exit "$status"
+    ;;
+  list) ls -1 datasets/raw 2>/dev/null || echo "no recordings yet" ;;
+  *) usage ;;
+esac

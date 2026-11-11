@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         ros-humble-cv-bridge python3-opencv \
         ros-humble-teleop-twist-keyboard \
         ros-humble-foxglove-bridge \
+        ros-humble-rosbag2-storage-mcap \
     && rm -rf /var/lib/apt/lists/*
 
 # micro-ROS agent, built from source (same repos micro_ros_setup uses).
@@ -43,7 +44,13 @@ RUN source /opt/ros/humble/setup.bash \
 # Use the project's tuned slam_toolbox params (compose mounts ./config at /work/config).
 # A symlink, not a single-file bind mount, so edits on the Mac are always picked up.
 RUN ln -sf /work/config/slam_toolbox.yaml \
-      /root/microros_ws/install/microros_v2_bringup/share/microros_v2_bringup/config/mapper_params_online_async.yaml
+      /root/microros_ws/install/microros_v2_bringup/share/microros_v2_bringup/config/mapper_params_online_async.yaml \
+    && ln -sf /work/config/ekf.yaml \
+      /root/microros_ws/install/microros_v2_bringup/share/microros_v2_bringup/config/ekf.yaml
+
+# Unit tests for the tools (./ros python3 -m pytest /work/tests).
+RUN apt-get update && apt-get install -y --no-install-recommends python3-pytest \
+    && rm -rf /var/lib/apt/lists/*
 
 # robot_tool.py reads camera_ip from this file; compose mounts the real one.
 RUN mkdir -p /root/microros_ws/.system_cfg /root/microros_ws/cache /root/map
