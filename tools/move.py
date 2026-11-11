@@ -41,6 +41,12 @@ TIMEOUT_FACTOR = 3.0     # give up after 3x the nominal duration
 # run-down). Measured 2026-11-11 on hardwood: ~18 mm after a 1 m drive and ~4.6 deg
 # after a turn, plus up to one 20 Hz control tick. Stopping this much early lands on target.
 LINEAR_COAST = 0.022                 # m
+# Straight-line driving holds the starting heading and steers back onto the line
+# through the start point. Without it the robot turned ~1 deg and slid 3-20 mm
+# sideways on every 1 m out-and-back (mostly while reversing).
+HEADING_GAIN = 2.0       # rad/s per rad of heading error
+CROSS_TRACK_GAIN = 3.0   # rad/s per m of sideways offset
+MAX_STEER = 0.3          # rad/s
 ANGULAR_COAST = math.radians(4.0)    # rad; varies 3.0-4.6 deg run to run
 
 
@@ -51,6 +57,18 @@ def yaw_of(msg: Odometry) -> float:
 
 def wrap(a: float) -> float:
     return math.atan2(math.sin(a), math.cos(a))
+
+
+def line_follow_wz(heading_err: float, cross: float, direction: float) -> float:
+    """Steering command to stay on a straight line.
+
+    heading_err: line heading minus robot heading (rad); cross: robot's sideways
+    offset from the line, left positive (m); direction: +1 forward, -1 reverse.
+    Reversing flips the effect of a heading change on the sideways offset, so the
+    cross-track term changes sign; the heading term doesn't.
+    """
+    wz = HEADING_GAIN * heading_err - CROSS_TRACK_GAIN * cross * direction
+    return max(-MAX_STEER, min(MAX_STEER, wz))
 
 
 class Mover(Node):
@@ -122,25 +140,42 @@ class Mover(Node):
             self.send()
             time.sleep(0.05)
 
-    def forward(self, dist: float) -> str:
+    def pose(self) -> tuple[float, float, float]:
+        """Current (x, y, yaw) from /odom; pass it to forward(line=...) to reuse a line."""
+        assert self.odom is not None
+        p = self.odom.pose.pose.position
+        return p.x, p.y, yaw_of(self.odom)
+
+    def forward(self, dist: float, line: tuple[float, float, float] | None = None) -> str:
+        """Drive dist meters (negative = reverse) in a straight line.
+
+        line: (x, y, yaw) of the line to follow; default is the current pose. For an
+        out-and-back, pass the start pose to both legs so the return steers back onto
+        the same line instead of starting a new one from wherever the robot coasted to.
+        """
         heading = 0.0 if dist >= 0 else math.pi
         assert self.odom is not None
         p0 = self.odom.pose.pose.position
-        speed = math.copysign(LINEAR_SPEED, dist)
+        lx, ly, yaw0 = line if line is not None else self.pose()
+        ux, uy = math.cos(yaw0), math.sin(yaw0)
+        direction = math.copysign(1.0, dist)
+        speed = direction * LINEAR_SPEED
         end = time.monotonic() + abs(dist) / LINEAR_SPEED * TIMEOUT_FACTOR + 1
         while time.monotonic() < end:
             rclpy.spin_once(self, timeout_sec=1.0 / RATE)
             p = self.odom.pose.pose.position
-            done = math.hypot(p.x - p0.x, p.y - p0.y)
+            done = ((p.x - p0.x) * ux + (p.y - p0.y) * uy) * direction  # progress along the line
+            cross = -(p.x - lx) * uy + (p.y - ly) * ux                 # sideways offset, left positive
             if done >= abs(dist) - LINEAR_COAST:
                 self.stop()
-                return f"moved {done:.3f} m (+ coast)"
+                return f"moved {done:.3f} m (+ coast), {cross * 1000:+.1f} mm off line"
             c = self.clearance(heading)
             if c < STOP_DIST:
                 self.stop()
                 return f"STOPPED after {done:.2f} m: obstacle {c:.2f} m ahead"
             remaining = abs(dist) - done
-            self.send(vx=speed if remaining > 0.05 else speed * 0.5)
+            wz = line_follow_wz(wrap(yaw0 - yaw_of(self.odom)), cross, direction)
+            self.send(vx=speed if remaining > 0.05 else speed * 0.5, wz=wz)
         self.stop()
         return "timed out"
 

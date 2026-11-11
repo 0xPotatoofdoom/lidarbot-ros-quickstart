@@ -85,6 +85,12 @@ case "${1:-}" in
     status=${PIPESTATUS[0]}
     set -e
     stop
+    # A tool can report ground truth by printing a line "GROUND_TRUTH_JSON {...}".
+    gt=$(grep -m1 '^GROUND_TRUTH_JSON ' "datasets/raw/$name/output.txt" | cut -d' ' -f2- || true)
+    if [ -n "$gt" ]; then
+      echo "$gt" | jq . > "datasets/raw/$name/ground_truth.json"
+      echo "saved datasets/raw/$name/ground_truth.json"
+    fi
     exit "$status"
     ;;
   list) ls -1 datasets/raw 2>/dev/null || echo "no recordings yet" ;;

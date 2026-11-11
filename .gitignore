@@ -8,6 +8,7 @@ vendor/
 
 # Local settings
 config/robot_info.json
+config/lab.json
 
 # Runtime output and your own maps (floor plans of your home)
 logs/

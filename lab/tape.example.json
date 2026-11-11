@@ -1,0 +1,9 @@
+{
+  "camera_url": "http://192.168.1.50:8080",
+  "marks_in": [12, 24, 36, 48, 60],
+  "camera_height_m": 1.08,
+  "edge_bottom_m": 0.0254,
+  "edge_top_m": 0.05,
+  "log_dir": "~/lab/logs",
+  "http_port": 8092
+}

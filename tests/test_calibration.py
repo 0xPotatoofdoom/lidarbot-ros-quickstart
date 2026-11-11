@@ -85,3 +85,14 @@ def test_yaw_scaler_scales_full_turns_continuously() -> None:
 @pytest.mark.parametrize("rpy", [(0.0, 0.0, 1.0), (0.05, -0.03, -2.5), (0.0, 0.0, math.pi - 1e-6)])
 def test_quaternion_round_trip(rpy: tuple[float, float, float]) -> None:
     assert rpy_of(quat_of(*rpy)) == pytest.approx(rpy, abs=1e-9)
+
+
+def test_line_follow_steers_back_toward_line() -> None:
+    from move import MAX_STEER, line_follow_wz
+    # left of the line, driving forward: turn right (clockwise, negative)
+    assert line_follow_wz(0.0, 0.02, 1.0) < 0
+    # left of the line, reversing: the rear must swing right, so turn left (positive)
+    assert line_follow_wz(0.0, 0.02, -1.0) > 0
+    # heading error is corrected the same way in both directions
+    assert line_follow_wz(0.1, 0.0, 1.0) == line_follow_wz(0.1, 0.0, -1.0) > 0
+    assert abs(line_follow_wz(5.0, 1.0, 1.0)) == MAX_STEER

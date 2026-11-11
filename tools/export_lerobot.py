@@ -42,6 +42,9 @@ TASKS = {  # label prefix -> task description
     "tape-verify-out": "Drive 1 m straight toward a wall along a tape measure (tape ground truth).",
     "tape-back": "Reverse 1 m straight away from a wall along a tape measure (tape ground truth).",
     "tape-verify-back": "Reverse 1 m straight away from a wall along a tape measure.",
+    "linear-repeat-lf": "Drive 1 m straight toward a wall along a tape and back, holding a straight line "
+                        "(repeatability, steering correction on).",
+    "linear-repeat": "Drive 1 m straight toward a wall along a tape and back (repeatability, no steering correction).",
 }
 
 
@@ -138,6 +141,18 @@ def features(beams: int, camera: bool) -> dict:
     return f
 
 
+def write_track(log: Path, out: Path, episode: int, t0: float, t1: float) -> str | None:
+    """Copy the overhead tape-tracker rows for one episode's time window."""
+    lines = log.read_text().splitlines()
+    rows = [ln for ln in lines[1:] if t0 <= float(ln.split(",", 1)[0]) <= t1]
+    if not rows:
+        return None
+    rel = f"meta/lidarbot_overhead/episode_{episode:03d}.csv"
+    (out / rel).parent.mkdir(parents=True, exist_ok=True)
+    (out / rel).write_text(lines[0] + "\n" + "\n".join(rows) + "\n")
+    return rel
+
+
 def export(args: argparse.Namespace) -> None:
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
@@ -177,11 +192,16 @@ def export(args: argparse.Namespace) -> None:
                 frame["observation.images.front"] = images[j]
             ds.add_frame(frame)
         ds.save_episode()
+        track_file = None
+        if args.tape_log:
+            track_file = write_track(Path(args.tape_log), out, i, float(times[0]), float(times[-1]))
         gt_path = run / "ground_truth.json"
         episodes.append({"episode_index": i, "recording": run.name, "label": meta["label"], "task": task,
                          "frames": len(times), "duration_s": round(float(times[-1] - times[0]), 2),
                          "calibration_in_use": meta.get("calibration"),
-                         "ground_truth": json.loads(gt_path.read_text()) if gt_path.exists() else None})
+                         "ground_truth": json.loads(gt_path.read_text()) if gt_path.exists() else None,
+                         "start_unix_time": round(float(times[0]), 3),
+                         "overhead_track": track_file})
         print(f"episode {i}: {run.name}  {len(times)} frames  {task}")
     assert ds is not None
     ds.finalize()
@@ -215,6 +235,7 @@ def main() -> None:
     ap.add_argument("--fps", type=int, default=10)
     ap.add_argument("--camera", action="store_true", help="include robot camera frames (review them first)")
     ap.add_argument("--overwrite", action="store_true")
+    ap.add_argument("--tape-log", help="overhead tape-tracker CSV (lab/tape_tracker.py) to slice per episode")
     ap.add_argument("--push", metavar="DATASET_DIR", help="upload a reviewed dataset folder instead of exporting")
     ap.add_argument("--private", action="store_true", help="create the Hub repo as private")
     args = ap.parse_args()

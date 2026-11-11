@@ -239,10 +239,11 @@ def linear(node: Mover, rec: Recorder, dist: float, legs: tuple[int, ...] = (1, 
         raise SystemExit(f"wall is {ahead:.2f} m ahead; need {dist + STOP_DIST + 0.15:.2f} m for {dist} m")
     print(f"wall {ahead:.3f} m ahead. Mark the start on your tape now if you want a manual check.")
     scales = []
+    line = node.pose()  # both legs follow the line through the starting pose
     for sign in legs:
         label = "forward" if sign > 0 else "back"
         r0 = range_ahead(*grab_scan(node))
-        result, t = run(node, rec, lambda s=sign: node.forward(s * dist))
+        result, t = run(node, rec, lambda s=sign: node.forward(s * dist, line))
         print(f"driving {label} {dist:.2f} m: {result}")
         true = r0 - range_ahead(*grab_scan(node))
         ekf, pose = t.ekf_dist * sign, t.raw_pose_dist * sign
