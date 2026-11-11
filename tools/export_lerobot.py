@@ -201,6 +201,9 @@ def push(args: argparse.Namespace) -> None:
     api.create_repo(args.repo_id, repo_type="dataset", exist_ok=True, private=args.private)
     api.upload_folder(repo_id=args.repo_id, repo_type="dataset", folder_path=str(root),
                       commit_message="Upload lidarbot dataset")
+    # LeRobot refuses to load a Hub dataset without a tag naming its format version.
+    version = json.loads((root / "meta" / "info.json").read_text())["codebase_version"]
+    api.create_tag(args.repo_id, tag=version, repo_type="dataset", exist_ok=True)
     print(f"pushed https://huggingface.co/datasets/{args.repo_id}")
 
 
