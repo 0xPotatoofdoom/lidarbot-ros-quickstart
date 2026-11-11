@@ -1,0 +1,10 @@
+--- a/microros_v2_bringup/package.xml
++++ b/microros_v2_bringup/package.xml
+@@ -12,7 +12,6 @@
+   <depend>sensor_msgs</depend>
+   <depend>std_srvs</depend>
+   <depend>interfaces</depend>
+-  <depend>smart_tracker</depend>
+   <depend>cv_bridge</depend>
+   <depend>tf2_ros</depend>
+   <depend>robot_localization</depend>

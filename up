@@ -1,0 +1,57 @@
+#!/bin/bash
+# Start the lidarbot stack.
+#   ./up          base only (agent, EKF, robot model) + Foxglove
+#   ./up slam     base + slam_toolbox mapping + Foxglove
+# Logs: logs/bridge.log on the Mac, /tmp/*.log in the container (./ros cat /tmp/base.log)
+set -euo pipefail
+cd "$(dirname "$0")"
+export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
+mkdir -p logs
+
+# First-run checks (see docs/02-mac-setup.md).
+if [ ! -d vendor/yahboom/src/microros_v2_bringup ]; then
+  echo "Yahboom packages missing: run ./fetch-yahboom first." >&2; exit 1
+fi
+if [ ! -f config/robot_info.json ]; then
+  echo "config/robot_info.json missing: cp config/robot_info.example.json config/robot_info.json" >&2
+  echo "and set camera_ip (or \"\" if your kit has no Wi-Fi camera)." >&2; exit 1
+fi
+if [ ! -x .venv/bin/python ]; then
+  echo "Python venv missing: uv venv .venv && uv pip install --python .venv pyserial" >&2; exit 1
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "Docker is not running: start Docker Desktop." >&2; exit 1
+fi
+
+docker compose up -d
+
+# UDP<->TCP relay must run natively on the Mac (Docker drops UDP replies).
+if ! pgrep -f tools/udp_tcp_bridge.py >/dev/null; then
+  nohup .venv/bin/python tools/udp_tcp_bridge.py >> logs/bridge.log 2>&1 &
+  echo "bridge started (pid $!)"
+fi
+
+# Stop anything already running in the container before relaunching.
+docker exec lidarbot pkill -f -- "--ros-args" >/dev/null 2>&1 || true
+docker exec lidarbot pkill -f "ros2 launch" >/dev/null 2>&1 || true
+sleep 1
+
+case "${1:-base}" in
+  slam) ./ros -d bash -c 'ros2 launch microros_v2_bringup slam_toolbox.launch.py rviz:=false > /tmp/slam.log 2>&1' ;;
+  base) ./ros -d bash -c 'ros2 launch microros_v2_bringup car_base.launch.py use_camera:=false > /tmp/base.log 2>&1' ;;
+  *) echo "usage: ./up [base|slam]"; exit 1 ;;
+esac
+./ros -d bash -c 'ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765 > /tmp/foxglove.log 2>&1'
+
+# Camera: keep the stream open continuously (one-shot reads return stale
+# frames) and aim it at the floor ahead for driving. View /camera/image_raw
+# in Foxglove, or ./ros python3 /work/tools/look.py -> maps/camera.jpg.
+CAMERA_IP=$(.venv/bin/python -c 'import json; print(json.load(open("config/robot_info.json")).get("camera_ip", ""))')
+if [ -n "$CAMERA_IP" ]; then
+  ./ros -d bash -c "ros2 run microros_v2_bringup camera_driver --ros-args -p camera_url:=http://${CAMERA_IP}:81/stream -p startup_delay:=0.5 > /tmp/camera.log 2>&1"
+  if [ "${CAR_TYPE:-ptz}" = "ptz" ]; then
+    ( sleep 8 && ./ros python3 /work/tools/ptz.py 0 -62 >/dev/null 2>&1 ) &
+  fi
+fi
+
+echo "Started '${1:-base}'. Foxglove: open connection ws://localhost:8765"

@@ -1,0 +1,11 @@
+#!/bin/bash
+# Run a command inside the lidarbot ROS container with the workspace sourced.
+#   ./ros ros2 topic list
+#   ./ros -d ros2 launch ...   (detached)
+set -euo pipefail
+DETACH=()
+if [[ "${1:-}" == "-d" ]]; then
+  DETACH=(-d)
+  shift
+fi
+exec docker exec ${DETACH[@]+"${DETACH[@]}"} -i lidarbot /entrypoint.sh "$@"

@@ -1,0 +1,77 @@
+#!/bin/bash
+# Download Yahboom's MicroROS V2 ROS 2 workspace, keep the packages this
+# project builds, and apply the patches in patches/.
+#
+#   ./fetch-yahboom [DEST]                 download, then unpack into DEST
+#   ./fetch-yahboom --zip FILE [DEST]      use a zip you downloaded yourself
+#   default DEST: vendor/yahboom/src
+#
+# Google Drive limits downloads per file per day. If it reports "quota
+# exceeded", open the download URL below in a browser (signed in to Google),
+# save the zip, and pass it with --zip.
+#
+# Yahboom's code is under their Business Source License 1.1 (see the LICENSE
+# file in each package). It is downloaded here rather than committed to this
+# repo. Source: the Google Drive folder linked from
+# https://github.com/YahboomTechnology/MicroROS-V2-Robot-Car (Annex_Download_Link.txt),
+# file 0.Code/mircoros_v2-1.0.1.zip.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+DRIVE_ID="1Kf0kCMlQtwxqDYYv66b-mgCO1uU9r7t8"
+URL="https://drive.usercontent.google.com/download?id=${DRIVE_ID}&export=download&confirm=t"
+SHA256="f4946ceccd7402c0b303760aa772b518a4a27a30c9ca3fe6ffff1655a910083e"
+PACKAGES=(common_demo interfaces microros_v2_bringup robot_description)
+# Files Yahboom shipped with their own credentials in them. Nothing in the
+# build uses them, so they are deleted rather than patched.
+REMOVE=(microros_v2_bringup/cli/config_robot
+        microros_v2_bringup/config/multi_brains_pre_setting.yaml)
+
+ZIP=""
+if [ "${1:-}" = "--zip" ]; then
+  ZIP="${2:?--zip needs a file}"
+  [ -f "$ZIP" ] || { echo "No such file: $ZIP" >&2; exit 1; }
+  shift 2
+fi
+DEST="${1:-vendor/yahboom/src}"
+if [ -e "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ]; then
+  echo "$DEST already exists and is not empty; remove it first to re-fetch." >&2
+  exit 1
+fi
+
+WORK=$(mktemp -d)
+trap 'rm -rf "$WORK"' EXIT
+
+if [ -z "$ZIP" ]; then
+  echo "Downloading mircoros_v2-1.0.1.zip (~15 MB)..."
+  ZIP="$WORK/code.zip"
+  curl -fL --retry 3 --progress-bar -o "$ZIP" "$URL"
+  if head -c 200 "$ZIP" | grep -qi '<html'; then
+    echo "Google Drive returned a web page instead of the zip (usually its daily" >&2
+    echo "download quota for this file). Download it in a browser instead:" >&2
+    echo "  $URL" >&2
+    echo "then run: ./fetch-yahboom --zip ~/Downloads/mircoros_v2-1.0.1.zip" >&2
+    exit 1
+  fi
+fi
+
+GOT=$(shasum -a 256 "$ZIP" | cut -d' ' -f1)
+if [ "$GOT" != "$SHA256" ]; then
+  echo "Checksum mismatch: expected $SHA256, got $GOT." >&2
+  echo "Yahboom may have published a new version; the patches may need updating." >&2
+  exit 1
+fi
+
+unzip -q "$ZIP" -d "$WORK/x"
+mkdir -p "$DEST"
+for pkg in "${PACKAGES[@]}"; do
+  cp -R "$WORK/x/mircoros_v2/src/$pkg" "$DEST/"
+done
+for f in "${REMOVE[@]}"; do
+  rm -f "$DEST/$f"
+done
+for p in patches/*.patch; do
+  echo "Applying $p"
+  patch -s -p1 -d "$DEST" < "$p"
+done
+echo "Yahboom packages ready in $DEST"

@@ -1,0 +1,28 @@
+--- a/microros_v2_bringup/launch/car_base.launch.py
++++ b/microros_v2_bringup/launch/car_base.launch.py
+@@ -38,6 +38,15 @@
+         )
+     )
+ 
++    # lidarbot: Docker Desktop on macOS drops UDP replies, so the agent listens
++    # on TCP and tools/udp_tcp_bridge.py relays the robot's UDP to it.
++    declared_arguments.append(
++        DeclareLaunchArgument('agent_transport', default_value='tcp4',
++                              description='micro-ROS agent transport (udp4|tcp4)'))
++    declared_arguments.append(
++        DeclareLaunchArgument('agent_port', default_value='8888',
++                              description='micro-ROS agent port'))
++
+     # camera_url format: http://<camera_ip>:81/stream
+     common_params = os.path.join(get_package_share_directory('microros_v2_bringup'),'config','common.yaml')
+     fastdds_profile = os.path.join(get_package_share_directory('microros_v2_bringup'),'config','fastdds_shm.xml')
+@@ -58,7 +67,8 @@
+         package='micro_ros_agent',
+         executable='micro_ros_agent',
+         output='screen',
+-        arguments=['udp4', '--port', '8090', '-v', LaunchConfiguration('micro_ros_agent_verbose')],
++        arguments=[LaunchConfiguration('agent_transport'), '--port', LaunchConfiguration('agent_port'),
++                   '-v', LaunchConfiguration('micro_ros_agent_verbose')],
+     )
+ 
+     base_driver=Node(

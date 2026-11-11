@@ -1,0 +1,18 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Yahboom's code: downloaded and patched by ./fetch-yahboom (their BSL 1.1 license)
+vendor/
+
+# Local settings
+config/robot_info.json
+
+# Runtime output and your own maps (floor plans of your home)
+logs/
+maps/*
+!maps/.gitkeep
+
+# macOS
+.DS_Store

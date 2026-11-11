@@ -1,0 +1,22 @@
+services:
+  ros:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: lidarbot-ros:humble
+    container_name: lidarbot
+    environment:
+      ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-77}"   # must match the robot's ros_domain_id
+      CAR_TYPE: "${CAR_TYPE:-ptz}"           # ptz (Superior kit, pan/tilt camera) | no_ptz | basic_car
+    # Host networking (Docker Desktop > Settings > Resources > Network >
+    # "Enable host networking"). Docker Desktop's UDP port publishing never
+    # delivered the robot's micro-ROS packets, so the agent binds the Mac's
+    # ports directly: UDP 8090 (robot) and TCP 8765 (foxglove_bridge).
+    network_mode: host
+    volumes:
+      - ./maps:/root/map
+      - ./tools:/work/tools
+      # config/slam_toolbox.yaml replaces Yahboom's params via a symlink in the image.
+      - ./config:/work/config:ro
+      - ./config/robot_info.json:/root/microros_ws/.system_cfg/robot_info.json
+    restart: unless-stopped
