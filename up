@@ -2,6 +2,7 @@
 # Start the lidarbot stack.
 #   ./up          base only (agent, EKF, robot model) + Foxglove
 #   ./up slam     base + slam_toolbox mapping + Foxglove
+#   ./up nav      base + Nav2 on maps/home.yaml (AMCL localization) + Foxglove
 # Logs: logs/bridge.log on the Mac, /tmp/*.log in the container (./ros cat /tmp/base.log)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -39,7 +40,11 @@ sleep 1
 case "${1:-base}" in
   slam) ./ros -d bash -c 'ros2 launch microros_v2_bringup slam_toolbox.launch.py rviz:=false > /tmp/slam.log 2>&1' ;;
   base) ./ros -d bash -c 'ros2 launch microros_v2_bringup car_base.launch.py use_camera:=false > /tmp/base.log 2>&1' ;;
-  *) echo "usage: ./up [base|slam]"; exit 1 ;;
+  nav)
+    # Nav2 on a saved map (maps/home.yaml by default; MAP=name.yaml ./up nav for another).
+    ./ros -d bash -c 'ros2 launch microros_v2_bringup car_base.launch.py use_camera:=false > /tmp/base.log 2>&1'
+    ./ros -d bash -c "ros2 launch nav2_bringup bringup_launch.py map:=/root/map/${MAP:-home.yaml} params_file:=/work/config/nav2.yaml use_sim_time:=False autostart:=True > /tmp/nav2.log 2>&1" ;;
+  *) echo "usage: ./up [base|slam|nav]"; exit 1 ;;
 esac
 # Odometry scale corrections (config/calibration.yaml); the EKF reads its output.
 ./ros -d bash -c 'python3 /work/tools/odom_calibrator.py --ros-args --params-file /work/config/calibration.yaml > /tmp/calibrator.log 2>&1'

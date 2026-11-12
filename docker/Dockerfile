@@ -52,6 +52,11 @@ RUN ln -sf /work/config/slam_toolbox.yaml \
 RUN apt-get update && apt-get install -y --no-install-recommends python3-pytest \
     && rm -rf /var/lib/apt/lists/*
 
+# Nav2 (navigation on a saved map: AMCL, planners, controllers, behavior trees).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ros-humble-navigation2 ros-humble-nav2-bringup \
+    && rm -rf /var/lib/apt/lists/*
+
 # robot_tool.py reads camera_ip from this file; compose mounts the real one.
 RUN mkdir -p /root/microros_ws/.system_cfg /root/microros_ws/cache /root/map
 

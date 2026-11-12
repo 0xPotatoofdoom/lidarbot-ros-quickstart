@@ -1,0 +1,175 @@
+# Nav2 settings for the lidarbot (./up nav). Only overrides; anything not listed uses
+# Nav2 Humble's defaults. Started from Yahboom's nav2_params.yaml, then:
+# - Regulated Pure Pursuit instead of MPPI: simple and predictable at the robot's 0.15 m/s.
+# - Footprint from the robot: wheels at x=+0.058 (track 0.171 m plus tyres), caster at
+#   x=-0.0665, bumper about 0.10 m ahead of base_footprint, body about 0.20 m wide.
+# - Speeds match tools/move.py (0.15 m/s, 0.5 rad/s), which the odometry was calibrated at.
+# - Goal tolerance 0.10 m / 0.15 rad so arrival accuracy can be measured.
+
+amcl:
+  ros__parameters:
+    base_frame_id: base_footprint
+    odom_frame_id: odom
+    global_frame_id: map
+    scan_topic: /scan
+    robot_model_type: nav2_amcl::DifferentialMotionModel
+    laser_model_type: likelihood_field
+    laser_max_range: 8.0          # same as config/slam_toolbox.yaml
+    laser_min_range: 0.2          # closer returns are the robot itself
+    max_beams: 90
+    min_particles: 500
+    max_particles: 2000
+    # Odometry is calibrated to ~0.1% (docs/07-calibration.md), so low motion noise.
+    alpha1: 0.05
+    alpha2: 0.05
+    alpha3: 0.05
+    alpha4: 0.05
+    update_min_d: 0.10
+    update_min_a: 0.10
+    transform_tolerance: 1.0
+    # Start where the mapping run started and ended: the kitchen tape start.
+    set_initial_pose: true
+    initial_pose: {x: 0.0, y: 0.0, z: 0.0, yaw: 0.0}
+
+map_server:
+  ros__parameters:
+    yaml_filename: /root/map/home.yaml
+
+bt_navigator:
+  ros__parameters:
+    global_frame: map
+    robot_base_frame: base_footprint
+    odom_topic: /odom
+    default_server_timeout: 20
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 10.0
+    min_x_velocity_threshold: 0.001
+    min_y_velocity_threshold: 0.5
+    min_theta_velocity_threshold: 0.001
+    progress_checker_plugin: progress_checker
+    goal_checker_plugins: [goal_checker]
+    controller_plugins: [FollowPath]
+    progress_checker:
+      plugin: nav2_controller::SimpleProgressChecker
+      required_movement_radius: 0.2
+      movement_time_allowance: 15.0
+    goal_checker:
+      plugin: nav2_controller::SimpleGoalChecker
+      stateful: true
+      xy_goal_tolerance: 0.10
+      yaw_goal_tolerance: 0.15
+    FollowPath:
+      plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
+      desired_linear_vel: 0.15
+      lookahead_dist: 0.35
+      min_lookahead_dist: 0.25
+      max_lookahead_dist: 0.6
+      lookahead_time: 1.5
+      use_velocity_scaled_lookahead_dist: false
+      rotate_to_heading_angular_vel: 0.5
+      use_rotate_to_heading: true
+      rotate_to_heading_min_angle: 0.5
+      max_angular_accel: 1.5
+      transform_tolerance: 0.5
+      min_approach_linear_velocity: 0.04
+      approach_velocity_scaling_dist: 0.4
+      use_regulated_linear_velocity_scaling: true
+      regulated_linear_scaling_min_radius: 0.6
+      regulated_linear_scaling_min_speed: 0.06
+      use_cost_regulated_linear_velocity_scaling: true
+      cost_scaling_dist: 0.4
+      cost_scaling_gain: 1.0
+      inflation_cost_scaling_factor: 4.0
+      use_collision_detection: true
+      max_allowed_time_to_collision_up_to_carrot: 1.5
+      allow_reversing: false
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      global_frame: odom
+      robot_base_frame: base_footprint
+      update_frequency: 5.0
+      publish_frequency: 2.0
+      rolling_window: true
+      width: 3
+      height: 3
+      resolution: 0.05
+      footprint: "[[0.11, 0.105], [0.11, -0.105], [-0.12, -0.105], [-0.12, 0.105]]"
+      plugins: [obstacle_layer, inflation_layer]
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: LaserScan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          raytrace_max_range: 4.0
+          obstacle_max_range: 3.5
+          obstacle_min_range: 0.2
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+        inflation_radius: 0.30
+        cost_scaling_factor: 4.0
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      global_frame: map
+      robot_base_frame: base_footprint
+      update_frequency: 1.0
+      publish_frequency: 1.0
+      resolution: 0.05
+      track_unknown_space: true
+      footprint: "[[0.11, 0.105], [0.11, -0.105], [-0.12, -0.105], [-0.12, 0.105]]"
+      plugins: [static_layer, obstacle_layer, inflation_layer]
+      static_layer:
+        plugin: nav2_costmap_2d::StaticLayer
+        map_subscribe_transient_local: true
+      obstacle_layer:
+        plugin: nav2_costmap_2d::ObstacleLayer
+        observation_sources: scan
+        scan:
+          topic: /scan
+          data_type: LaserScan
+          max_obstacle_height: 2.0
+          clearing: true
+          marking: true
+          raytrace_max_range: 4.0
+          obstacle_max_range: 3.5
+          obstacle_min_range: 0.2
+      inflation_layer:
+        plugin: nav2_costmap_2d::InflationLayer
+        inflation_radius: 0.35
+        cost_scaling_factor: 4.0
+
+planner_server:
+  ros__parameters:
+    planner_plugins: [GridBased]
+    GridBased:
+      plugin: nav2_navfn_planner/NavfnPlanner
+      tolerance: 0.2
+      use_astar: true
+      allow_unknown: false
+
+behavior_server:
+  ros__parameters:
+    global_frame: odom
+    robot_base_frame: base_footprint
+    max_rotational_vel: 0.5
+    min_rotational_vel: 0.2
+    rotational_acc_lim: 1.5
+
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0
+    feedback: OPEN_LOOP
+    max_velocity: [0.15, 0.0, 0.6]
+    min_velocity: [-0.10, 0.0, -0.6]
+    max_accel: [0.5, 0.0, 1.5]
+    max_decel: [-0.5, 0.0, -1.5]
+    odom_topic: /odom
