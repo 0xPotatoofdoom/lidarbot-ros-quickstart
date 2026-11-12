@@ -54,11 +54,18 @@ class Explorer(Mover):
         while time.monotonic() < end:
             rclpy.spin_once(self, timeout_sec=0.05)
 
-    def map_pose(self) -> tuple[float, float, float] | None:
-        try:
-            t = self.tf.lookup_transform("map", "base_footprint", rclpy.time.Time())
-        except TransformException:
-            return None
+    def map_pose(self, wait: float = 3.0) -> tuple[float, float, float] | None:
+        """Robot pose in the map frame. slam_toolbox's map->odom transform can arrive late
+        (right after start, or while it catches up), so keep spinning for up to `wait` s."""
+        end = time.monotonic() + wait
+        while True:
+            try:
+                t = self.tf.lookup_transform("map", "base_footprint", rclpy.time.Time())
+                break
+            except TransformException:
+                if time.monotonic() > end:
+                    return None
+                rclpy.spin_once(self, timeout_sec=0.1)
         q = t.transform.rotation
         yaw = math.atan2(2 * (q.w * q.z + q.x * q.y), 1 - 2 * (q.y * q.y + q.z * q.z))
         return t.transform.translation.x, t.transform.translation.y, yaw
