@@ -108,3 +108,4 @@ def test_battery_curve_interpolates_and_clamps() -> None:
     assert curve.percent(3.876) == pytest.approx(50)
     assert curve.percent(3.855) == pytest.approx(45)
     assert curve.percent(alarm / cells) == pytest.approx(0, abs=0.5)
+

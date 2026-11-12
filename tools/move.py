@@ -12,8 +12,10 @@ travel; the robot stops if anything is closer than STOP_DIST.
 from __future__ import annotations
 
 import math
+import signal
 import sys
 import time
+from pathlib import Path
 
 import rclpy
 from geometry_msgs.msg import Twist
@@ -21,6 +23,9 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from scan_anchor import Located, ScanAnchor, anchor_in_odom  # noqa: E402
 
 LINEAR_SPEED = 0.15      # m/s
 ANGULAR_SPEED = 0.5      # rad/s
@@ -48,6 +53,15 @@ HEADING_GAIN = 2.0       # rad/s per rad of heading error
 CROSS_TRACK_GAIN = 3.0   # rad/s per m of sideways offset
 MAX_STEER = 0.3          # rad/s
 ANGULAR_COAST = math.radians(4.0)    # rad; varies 3.0-4.6 deg run to run
+def init_ros() -> None:
+    """rclpy.init without its Ctrl-C handler, so a `finally: node.stop()` can still publish.
+
+    rclpy's own handler shuts the context down first, and the stop command then fails,
+    leaving the robot on its last velocity. SIGTERM (plain pkill) is treated the same way.
+    """
+    from rclpy.signals import SignalHandlerOptions
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+    signal.signal(signal.SIGTERM, signal.default_int_handler)
 
 
 def yaw_of(msg: Odometry) -> float:
@@ -146,12 +160,51 @@ class Mover(Node):
         p = self.odom.pose.pose.position
         return p.x, p.y, yaw_of(self.odom)
 
+    def fresh_scans(self, n: int, timeout: float = 3.0) -> list[LaserScan]:
+        got, last = [], self.scan
+        end = time.monotonic() + timeout
+        while len(got) < n and time.monotonic() < end:
+            rclpy.spin_once(self, timeout_sec=0.05)
+            if self.scan is not None and self.scan is not last:
+                last = self.scan
+                got.append(last)
+        return got
+
+    def along(self, line: tuple[float, float, float]) -> float:
+        """How far the robot is along line (m, from the line's origin in its direction)."""
+        x, y, _ = self.pose()
+        return (x - line[0]) * math.cos(line[2]) + (y - line[1]) * math.sin(line[2])
+
+    def anchor(self) -> ScanAnchor:
+        """Reference scan at the current pose (robot still). See relocate()."""
+        return ScanAnchor(self.fresh_scans(1)[0], self.pose())
+
+    def relocate(self, anchor: ScanAnchor, line: tuple[float, float, float] | None = None,
+                 scans: int = 5) -> tuple[tuple[float, float, float], Located] | None:
+        """Robot still near the anchor spot: the anchor's line in current odometry coordinates
+        (pass it to forward(line=...)) and the robot's pose relative to the anchor.
+
+        Odometry drifts slowly from cycle to cycle; this resets the line to where the walls
+        say it is. Pass the line from the previous relocate() so matching starts from the
+        latest correction. Median over a few scans; None if they don't match.
+        """
+        locs = [loc for sc in self.fresh_scans(scans)
+                if (loc := anchor.locate(sc, self.pose(), line)) is not None]
+        if len(locs) < 3:
+            return None
+        med = sorted(locs, key=lambda l: l.y)[len(locs) // 2]
+        yaw = sorted(l.yaw for l in locs)[len(locs) // 2]
+        located = Located(med.x, med.y, yaw, med.rms, med.inliers)
+        return anchor_in_odom(self.pose(), located), located
+
     def forward(self, dist: float, line: tuple[float, float, float] | None = None) -> str:
         """Drive dist meters (negative = reverse) in a straight line.
 
         line: (x, y, yaw) of the line to follow; default is the current pose. For an
         out-and-back, pass the start pose to both legs so the return steers back onto
         the same line instead of starting a new one from wherever the robot coasted to.
+        To stop slow drift over many cycles, re-measure the line with relocate() each time
+        the robot is back at the start.
         """
         heading = 0.0 if dist >= 0 else math.pi
         assert self.odom is not None
@@ -166,6 +219,7 @@ class Mover(Node):
             p = self.odom.pose.pose.position
             done = ((p.x - p0.x) * ux + (p.y - p0.y) * uy) * direction  # progress along the line
             cross = -(p.x - lx) * uy + (p.y - ly) * ux                 # sideways offset, left positive
+            heading_err = wrap(yaw0 - yaw_of(self.odom))
             if done >= abs(dist) - LINEAR_COAST:
                 self.stop()
                 return f"moved {done:.3f} m (+ coast), {cross * 1000:+.1f} mm off line"
@@ -174,7 +228,7 @@ class Mover(Node):
                 self.stop()
                 return f"STOPPED after {done:.2f} m: obstacle {c:.2f} m ahead"
             remaining = abs(dist) - done
-            wz = line_follow_wz(wrap(yaw0 - yaw_of(self.odom)), cross, direction)
+            wz = line_follow_wz(heading_err, cross, direction)
             self.send(vx=speed if remaining > 0.05 else speed * 0.5, wz=wz)
         self.stop()
         return "timed out"
@@ -203,7 +257,7 @@ def main() -> None:
     if len(sys.argv) != 3 or sys.argv[1] not in ("forward", "rotate"):
         raise SystemExit(__doc__)
     cmd, value = sys.argv[1], float(sys.argv[2])
-    rclpy.init()
+    init_ros()
     node = Mover()
     try:
         node.wait_ready()
@@ -218,10 +272,12 @@ def main() -> None:
             result = node.rotate(value)
         node.stop()
         print(result)
+    except KeyboardInterrupt:
+        pass
     finally:
         node.stop()
         node.destroy_node()
-        rclpy.shutdown()
+        rclpy.try_shutdown()
 
 
 if __name__ == "__main__":

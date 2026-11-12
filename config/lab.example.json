@@ -1,3 +1,4 @@
 {
-  "tape_url": "http://raspberrypi.local:8092"
+  "tape_url": "http://raspberrypi.local:8092",
+  "phone_url": "http://192.168.1.50:8080"
 }
