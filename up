@@ -43,6 +43,8 @@ case "${1:-base}" in
 esac
 # Odometry scale corrections (config/calibration.yaml); the EKF reads its output.
 ./ros -d bash -c 'python3 /work/tools/odom_calibrator.py --ros-args --params-file /work/config/calibration.yaml > /tmp/calibrator.log 2>&1'
+# Battery voltage -> /battery_state and datasets/battery/ log (config/battery.yaml).
+./ros -d bash -c 'python3 /work/tools/battery_monitor.py --ros-args > /tmp/battery.log 2>&1'
 ./ros -d bash -c 'ros2 launch foxglove_bridge foxglove_bridge_launch.xml port:=8765 > /tmp/foxglove.log 2>&1'
 
 # Camera: keep the stream open continuously (one-shot reads return stale

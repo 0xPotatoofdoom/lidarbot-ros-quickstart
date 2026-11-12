@@ -96,3 +96,15 @@ def test_line_follow_steers_back_toward_line() -> None:
     # heading error is corrected the same way in both directions
     assert line_follow_wz(0.1, 0.0, 1.0) == line_follow_wz(0.1, 0.0, -1.0) > 0
     assert abs(line_follow_wz(5.0, 1.0, 1.0)) == MAX_STEER
+
+
+def test_battery_curve_interpolates_and_clamps() -> None:
+    from pathlib import Path
+
+    from battery_monitor import load_config
+    cells, curve, alarm, capacity = load_config(Path("/work/config/battery.yaml"))
+    assert cells == 3 and alarm == 10.2 and capacity == 2.2
+    assert curve.percent(4.25) == 100 and curve.percent(3.2) == 0
+    assert curve.percent(3.876) == pytest.approx(50)
+    assert curve.percent(3.855) == pytest.approx(45)
+    assert curve.percent(alarm / cells) == pytest.approx(0, abs=0.5)

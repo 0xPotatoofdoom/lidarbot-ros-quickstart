@@ -99,3 +99,39 @@ within about 5 mm and a full turn within about 1.5 degrees.
 Right after the micro-ROS agent restarts, the robot can send a message stamped with its
 unsynced clock (decades off). The EKF integrated one of those into a jump of hundreds of
 meters. `odom_calibrator.py` drops any message stamped more than 0.5 s from the host clock.
+
+## Battery
+
+`./up` starts `tools/battery_monitor.py`. It reads the pack voltage the firmware sends on
+`/battery`, publishes `/battery_state` (sensor_msgs/BatteryState, with percent and amp-hours
+left) and logs to `datasets/battery/battery_YYYYMMDD.csv` (files are named by UTC date). The
+voltage drops while the motors pull current, so the percent only updates once the robot has
+been still for 20 s.
+
+The voltage-to-percent curve in `config/battery.yaml` comes from one full idle discharge:
+
+1. Charge the pack until the charger light turns green, then switch the robot on and run `./up`.
+2. Leave the robot still (no gamepad, no drive commands) until it beeps at 10.2 V, then
+   switch it off.
+3. Fit the curve: `.venv/bin/python tools/battery_report.py datasets/battery/battery_*.csv`
+   and paste the `ocv_curve` block it prints into `config/battery.yaml`.
+
+Our 3S 2200 mAh pack (2026-11-11):
+
+| Remaining | Resting V | V/cell |
+|---|---|---|
+| 100% | 12.47 | 4.16 |
+| 80% | 12.03 | 4.01 |
+| 60% | 11.90 | 3.97 |
+| 50% | 11.63 | 3.88 |
+| 40% | 11.50 | 3.83 |
+| 20% | 11.25 | 3.75 |
+| 10% | 10.83 | 3.61 |
+| 0% (alarm) | 10.19 | 3.40 |
+
+- Idle runtime from full to the alarm was 7.1 hours, an average draw of about 0.29 A
+  (3.2 W) with the lidar and camera running.
+- The last 10% goes in about 40 minutes. Below 11.0 V, end the session.
+- Straight off the charger, the voltage drops about 0.3 V in the first 20 minutes as the
+  charger's surface charge drains. That doesn't mean the pack is losing capacity.
+- Driving draws much more than idle. Measuring driving runtime is still to do.

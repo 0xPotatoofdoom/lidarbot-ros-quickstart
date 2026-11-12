@@ -1,0 +1,24 @@
+# Battery model for tools/battery_monitor.py.
+# Yahboom docs: "12V lithium battery", normal range 9.6-12.6 V, firmware beeps
+# below 10.2 V (yahboom.net/study/MicroROS-V2/20035, 20204). 12.6 V full = 3 cells.
+# Pack label: "12V 2200mAh 3 cell". About 24 Wh at 11.1 V nominal.
+battery:
+  cells: 3
+  capacity_ah: 2.2
+  alarm_v: 10.2
+  # Resting voltage per cell -> percent remaining, fitted from a full idle discharge
+  # (tools/battery_report.py, 2026-11-11): robot on, lidar spinning, camera streaming,
+  # not driving. 12.47 V to the 10.2 V alarm in 7.08 h, about 0.29 A / 3.2 W.
+  # Percent is share of that runtime, so it tracks charge under a steady load.
+  ocv_curve:
+    - [3.397, 0]
+    - [3.610, 10]
+    - [3.751, 20]
+    - [3.806, 30]
+    - [3.834, 40]
+    - [3.876, 50]
+    - [3.966, 60]
+    - [3.995, 70]
+    - [4.009, 80]
+    - [4.041, 90]
+    - [4.156, 100]
