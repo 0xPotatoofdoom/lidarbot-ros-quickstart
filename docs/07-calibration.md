@@ -216,4 +216,5 @@ resistance about 0.35 ohm). A dry caster cost about 15% of the current. Leg 2 wa
 Return to the start over 430 scan-matched cycles: -6.1 mm on average, spread 2.9 mm, range
 -17.7 to +5.4 mm, heading within 1.3 deg, with no growth over the run. Odometry alone drifts
 about 4 mm and 0.07 deg per cycle. One match (cycle 102) jumped 84 mm and 20 deg and the
-next cycle corrected it; a plausibility check on the jump size would catch that.
+next cycle corrected it. `relocate()` now rejects a match more than 5 cm or 3 deg from
+odometry's guess and keeps the previous line instead.

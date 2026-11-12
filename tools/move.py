@@ -25,7 +25,7 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import LaserScan
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from scan_anchor import Located, ScanAnchor, anchor_in_odom  # noqa: E402
+from scan_anchor import Located, ScanAnchor, anchor_in_odom, plausible  # noqa: E402
 
 LINEAR_SPEED = 0.15      # m/s
 ANGULAR_SPEED = 0.5      # rad/s
@@ -186,7 +186,8 @@ class Mover(Node):
 
         Odometry drifts slowly from cycle to cycle; this resets the line to where the walls
         say it is. Pass the line from the previous relocate() so matching starts from the
-        latest correction. Median over a few scans; None if they don't match.
+        latest correction. Median over a few scans; None if they don't match, or if the
+        match is too far from odometry's guess to be real (scan_anchor.plausible).
         """
         locs = [loc for sc in self.fresh_scans(scans)
                 if (loc := anchor.locate(sc, self.pose(), line)) is not None]
@@ -195,7 +196,14 @@ class Mover(Node):
         med = sorted(locs, key=lambda l: l.y)[len(locs) // 2]
         yaw = sorted(l.yaw for l in locs)[len(locs) // 2]
         located = Located(med.x, med.y, yaw, med.rms, med.inliers)
-        return anchor_in_odom(self.pose(), located), located
+        pose = self.pose()
+        guess = anchor.odom_guess(pose, line)
+        if not plausible(located, guess):
+            print(f"  scan match rejected: {located.x * 1000:+.1f}, {located.y * 1000:+.1f} mm, "
+                  f"{math.degrees(located.yaw):+.2f} deg, odometry says {guess[0] * 1000:+.1f}, "
+                  f"{guess[1] * 1000:+.1f} mm, {math.degrees(guess[2]):+.2f} deg", flush=True)
+            return None
+        return anchor_in_odom(pose, located), located
 
     def forward(self, dist: float, line: tuple[float, float, float] | None = None) -> str:
         """Drive dist meters (negative = reverse) in a straight line.

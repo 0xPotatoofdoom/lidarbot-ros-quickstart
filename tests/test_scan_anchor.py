@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from scan_anchor import Located, ScanAnchor, anchor_in_odom, compose, invert, transform  # noqa: E402
+from scan_anchor import Located, ScanAnchor, anchor_in_odom, compose, invert, plausible, transform  # noqa: E402
 
 BEAMS = 667
 INC = 2 * math.pi / BEAMS
@@ -119,3 +119,17 @@ def test_guess_follows_the_latest_correction() -> None:
     assert abs(guess[1]) < 0.003 and abs(anchor.odom_guess(drifted_odom)[1]) > 0.18
     loc = anchor.locate(scan, drifted_odom, line)
     assert loc is not None and loc.y == pytest.approx(0.0, abs=0.004)
+
+
+def test_plausible_rejects_a_big_jump() -> None:
+    """2026-11-11 cycle 102: the match put the robot 84 mm and 20 deg from where odometry
+    said it was, between two cycles that agreed to a few mm. Reject it; small offsets pass."""
+    guess = (0.004, -0.002, math.radians(0.1))
+    assert plausible(Located(0.010, 0.003, math.radians(0.6), 0.01, 0.9), guess)
+    assert not plausible(Located(0.084, 0.0, math.radians(-20.3), 0.01, 0.9), guess)
+    assert not plausible(Located(0.004, 0.07, 0.0, 0.01, 0.9), guess)            # 7 cm sideways
+    assert not plausible(Located(0.004, -0.002, math.radians(4.0), 0.01, 0.9), guess)
+
+
+def test_plausible_wraps_heading() -> None:
+    assert plausible(Located(0.0, 0.0, math.radians(179.5), 0.01, 0.9), (0.0, 0.0, math.radians(-179.5)))

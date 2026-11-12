@@ -26,6 +26,10 @@ ITERS = 20
 PAIR_DIST = (0.20, 0.10, 0.05)   # m; inlier distance, tightened as the match converges
 MIN_INLIERS = 0.5     # share of scan points that must match the reference
 MAX_RMS = 0.03        # m
+# Between two returns to the start, odometry drifts a few mm and under 0.1 deg, so a match far
+# from odometry's guess is a false match (2026-11-11: one in 430 put the robot 84 mm, 20 deg off).
+MAX_JUMP = 0.05       # m
+MAX_TURN = math.radians(3.0)
 
 
 @dataclass(frozen=True)
@@ -118,6 +122,14 @@ class ScanAnchor:
                anchor_odom: tuple[float, float, float] | None = None) -> Located | None:
         src = scan_points(scan.ranges, scan.angle_min, scan.angle_increment, SCAN_POINTS)
         return icp(src, self.ref, self.odom_guess(odom_pose, anchor_odom))
+
+
+def plausible(located: Located, guess: tuple[float, float, float],
+              max_jump: float = MAX_JUMP, max_turn: float = MAX_TURN) -> bool:
+    """Whether a match agrees with odometry's guess (ScanAnchor.odom_guess) closely enough to
+    trust. Pass the guess from the latest corrected line, or it carries the whole drift."""
+    dyaw = math.atan2(math.sin(located.yaw - guess[2]), math.cos(located.yaw - guess[2]))
+    return math.hypot(located.x - guess[0], located.y - guess[1]) <= max_jump and abs(dyaw) <= max_turn
 
 
 def compose(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
