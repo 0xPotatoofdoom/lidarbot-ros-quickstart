@@ -62,3 +62,23 @@ to continue mapping later. `maps/` is git-ignored: a map is a floor plan of your
 
 Yahboom's `save_map.launch.py` needs Cartographer, which isn't installed; use the
 commands above instead.
+
+## Check a map against a tape measure
+
+Measure a few wall-to-wall spans in the room and compare them with the map. In the map,
+take the occupied cells on the inside face of each wall and count the cells between their
+centers (times the 0.05 m resolution). Counting only the free cells between the walls reads
+about one cell (5 cm) short.
+
+Our home map (2026-11-12, calibrated odometry, 8 m lidar range, one loop back to the start):
+
+| | Tape | Map |
+|---|---|---|
+| Hallway width | 0.91 m | 0.90-0.95 m |
+| Kitchen, wall to cabinet door | 2.26 m | 2.20-2.25 m |
+| Whole house, living room wall to front door | 9.50 m | 9.60-9.65 m |
+
+Within about 1%. The lidar over-reads range differences by about 3% (see
+[calibration](07-calibration.md)); the map shows only part of that, probably because the
+calibrated wheel odometry holds the scan matcher back. By the time the robot got back to
+the start, odometry had drifted 17 cm and 2.8 deg, which slam_toolbox corrected.
