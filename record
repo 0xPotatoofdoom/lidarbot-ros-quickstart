@@ -11,7 +11,8 @@ export PATH="/Applications/Docker.app/Contents/Resources/bin:$PATH"
 
 TOPICS=(/scan /odom /odom_raw /odom_cal /imu /imu_cal /cmd_vel /tf /tf_static
         /joint_states /robot_description /ptz_angle /camera/camera_info
-        /camera/image_raw/compressed /map /map_metadata /diagnostics)
+        /camera/image_raw/compressed /map /map_metadata /diagnostics
+        /battery /battery_state)
 STATE=datasets/.current
 
 usage() { sed -n 2,7p "$0" | sed 's/^# \{0,1\}//'; exit 1; }

@@ -20,7 +20,8 @@ Each recording is a folder in `datasets/raw/<UTC time>_<label>/`:
 
 Topics recorded: `/scan`, `/odom`, `/odom_raw`, `/odom_cal`, `/imu`, `/imu_cal`, `/cmd_vel`,
 `/tf`, `/tf_static`, `/joint_states`, `/robot_description`, `/ptz_angle`,
-`/camera/camera_info`, `/camera/image_raw/compressed` (JPEG), `/map` and `/map_metadata`.
+`/camera/camera_info`, `/camera/image_raw/compressed` (JPEG), `/map`, `/map_metadata`,
+`/battery` (pack volts) and `/battery_state`.
 A minute of driving with the camera is roughly 10 MB.
 
 ## Privacy
@@ -42,7 +43,8 @@ uv pip install --python .venv-hf 'lerobot[dataset]==0.7.0' mcap-ros2-support==0.
 ```
 
 Each recording becomes one episode at 10 Hz: EKF state, raw wheel odometry, IMU, lidar
-ranges and the commanded velocity. Camera frames are left out unless you pass `--camera`.
+ranges and the commanded velocity, plus the pack voltage (`observation.battery_voltage`) when every
+recording has `/battery`. Camera frames are left out unless you pass `--camera`.
 A `ground_truth.json` next to a recording (for example tape readings) is carried into
 `meta/lidarbot_episodes.json`.
 

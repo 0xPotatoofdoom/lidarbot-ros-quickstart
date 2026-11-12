@@ -8,7 +8,9 @@ Runs on the Mac in the .venv-hf environment (no ROS needed):
 Each recording becomes one episode, resampled to --fps on the recorder's clock
 (message receive time) by holding the latest value of each topic. Camera frames
 are left out unless --camera is given: they show the inside of your home, so
-review them before including them.
+review them before including them. The pack voltage (/battery) becomes
+observation.battery_voltage when every recording has it (recordings made before
+2026-11-12 don't).
 
 Nothing is uploaded. Review the output, then push with:
     .venv-hf/bin/python tools/export_lerobot.py --push datasets/lerobot/NAME --repo-id ...
@@ -78,9 +80,9 @@ def read_recording(bag_dir: Path, camera: bool) -> tuple[dict[str, Series], dict
     mcaps = sorted(bag_dir.glob("*.mcap"))
     if not mcaps:
         raise SystemExit(f"no .mcap in {bag_dir}")
-    s: dict[str, Series] = {k: Series() for k in ("odom", "odom_raw", "imu", "scan", "cmd_vel", "image")}
+    s: dict[str, Series] = {k: Series() for k in ("odom", "odom_raw", "imu", "scan", "cmd_vel", "image", "battery")}
     scan_info: dict = {}
-    topics = ["/odom", "/odom_raw", "/imu", "/scan", "/cmd_vel"] + (["/camera/image_raw/compressed"] if camera else [])
+    topics = ["/odom", "/odom_raw", "/imu", "/scan", "/cmd_vel", "/battery"] + (["/camera/image_raw/compressed"] if camera else [])
     for path in mcaps:
         with path.open("rb") as f:
             reader = make_reader(f, decoder_factories=[DecoderFactory()])
@@ -107,6 +109,9 @@ def read_recording(bag_dir: Path, camera: bool) -> tuple[dict[str, Series], dict
                 elif topic == "/cmd_vel":
                     vec = np.array([m.linear.x, m.angular.z])
                     key = "cmd_vel"
+                elif topic == "/battery":
+                    vec = np.array([m.data])
+                    key = "battery"
                 else:
                     import cv2  # only needed with --camera
                     img = cv2.imdecode(np.frombuffer(bytes(m.data), np.uint8), cv2.IMREAD_COLOR)
@@ -117,8 +122,21 @@ def read_recording(bag_dir: Path, camera: bool) -> tuple[dict[str, Series], dict
     return s, scan_info
 
 
-def frame_times(s: dict[str, Series], fps: int, camera: bool) -> np.ndarray:
-    needed = ["odom", "odom_raw", "imu", "scan"] + (["image"] if camera else [])
+def has_topic(bag_dir: Path, topic: str) -> bool:
+    """Whether any .mcap in the bag recorded at least one message on topic."""
+    for path in sorted(bag_dir.glob("*.mcap")):
+        with path.open("rb") as f:
+            summary = make_reader(f).get_summary()
+        if summary is None or summary.statistics is None:
+            continue
+        ids = [c.id for c in summary.channels.values() if c.topic == topic]
+        if any(summary.statistics.channel_message_counts.get(i, 0) for i in ids):
+            return True
+    return False
+
+
+def frame_times(s: dict[str, Series], fps: int, camera: bool, battery: bool) -> np.ndarray:
+    needed = ["odom", "odom_raw", "imu", "scan"] + (["image"] if camera else []) + (["battery"] if battery else [])
     for k in needed:
         if not s[k].t:
             raise SystemExit(f"recording has no {k} messages")
@@ -127,7 +145,7 @@ def frame_times(s: dict[str, Series], fps: int, camera: bool) -> np.ndarray:
     return np.arange(start, end, 1.0 / fps)
 
 
-def features(beams: int, camera: bool) -> dict:
+def features(beams: int, camera: bool, battery: bool) -> dict:
     f = {
         "observation.state": {"dtype": "float32", "shape": (5,), "names": POSE_NAMES},
         "observation.odom_raw": {"dtype": "float32", "shape": (5,), "names": POSE_NAMES},
@@ -135,6 +153,8 @@ def features(beams: int, camera: bool) -> dict:
         "observation.scan": {"dtype": "float32", "shape": (beams,), "names": None},
         "action": {"dtype": "float32", "shape": (2,), "names": ACTION_NAMES},
     }
+    if battery:
+        f["observation.battery_voltage"] = {"dtype": "float32", "shape": (1,), "names": ["volts"]}
     if camera:
         f["observation.images.front"] = {"dtype": "video", "shape": (480, 640, 3),
                                          "names": ["height", "width", "channels"]}
@@ -162,15 +182,17 @@ def export(args: argparse.Namespace) -> None:
             raise SystemExit(f"{out} exists; pass --overwrite to replace it")
         shutil.rmtree(out)
     runs = [Path(r) for r in args.recordings]
+    battery = all(has_topic(run / "bag", "/battery") for run in runs)
+    print(f"battery voltage: {'included' if battery else 'left out (not in every recording)'}")
     ds = None
     episodes = []
     for i, run in enumerate(runs):
         meta = json.loads((run / "metadata.json").read_text())
         series, scan_info = read_recording(run / "bag", args.camera)
-        times = frame_times(series, args.fps, args.camera)
+        times = frame_times(series, args.fps, args.camera, battery)
         if ds is None:
             ds = LeRobotDataset.create(repo_id=args.repo_id, fps=args.fps, root=out, robot_type=ROBOT_TYPE,
-                                       features=features(scan_info["beams"], args.camera),
+                                       features=features(scan_info["beams"], args.camera, battery),
                                        use_videos=args.camera)
         cols = {k: series[k].at(times).astype(np.float32) for k in ("odom", "odom_raw", "imu", "scan")}
         # cmd_vel is only published while a tool drives; before the first command it is zero.
@@ -182,6 +204,7 @@ def export(args: argparse.Namespace) -> None:
         else:
             act = np.zeros((len(times), 2), np.float32)
         images = series["image"].at(times) if args.camera else None
+        volts = series["battery"].at(times).astype(np.float32) if battery else None
         task = meta.get("task") or ""
         task = task if task and not task.startswith(("./ros", "sleep")) else task_for(meta["label"])
         for j in range(len(times)):
@@ -190,6 +213,8 @@ def export(args: argparse.Namespace) -> None:
                      "action": act[j], "task": task}
             if images is not None:
                 frame["observation.images.front"] = images[j]
+            if volts is not None:
+                frame["observation.battery_voltage"] = volts[j]
             ds.add_frame(frame)
         ds.save_episode()
         track_file = None
