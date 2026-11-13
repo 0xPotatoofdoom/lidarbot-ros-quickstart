@@ -3,6 +3,8 @@
 #   ./up          base only (agent, EKF, robot model) + Foxglove
 #   ./up slam     base + slam_toolbox mapping + Foxglove
 #   ./up nav      base + Nav2 on maps/home.yaml (AMCL localization) + Foxglove
+#   ROS_DISTRO=jazzy ./up ...   same on the ROS 2 Jazzy image (default: humble; see the
+#                               Jazzy migration notes in docs/02-mac-setup.md)
 # Logs: logs/bridge.log on the Mac, /tmp/*.log in the container (./ros cat /tmp/base.log)
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -43,7 +45,8 @@ case "${1:-base}" in
   nav)
     # Nav2 on a saved map (maps/home.yaml by default; MAP=name.yaml ./up nav for another).
     ./ros -d bash -c 'ros2 launch microros_v2_bringup car_base.launch.py use_camera:=false > /tmp/base.log 2>&1'
-    ./ros -d bash -c "ros2 launch nav2_bringup bringup_launch.py map:=/root/map/${MAP:-home.yaml} params_file:=/work/config/nav2.yaml use_sim_time:=False autostart:=True > /tmp/nav2.log 2>&1" ;;
+    # Nav2's parameters differ between releases: config/nav2_jazzy.yaml on Jazzy, config/nav2.yaml on Humble.
+    ./ros -d bash -c "p=/work/config/nav2_\${ROS_DISTRO}.yaml; [ -f \$p ] || p=/work/config/nav2.yaml; ros2 launch nav2_bringup bringup_launch.py map:=/root/map/${MAP:-home.yaml} params_file:=\$p use_sim_time:=False autostart:=True > /tmp/nav2.log 2>&1" ;;
   *) echo "usage: ./up [base|slam|nav]"; exit 1 ;;
 esac
 # Odometry scale corrections (config/calibration.yaml); the EKF reads its output.

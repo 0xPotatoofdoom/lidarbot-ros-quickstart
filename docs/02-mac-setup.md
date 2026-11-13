@@ -66,6 +66,18 @@ docker compose build
 The first build takes several minutes (it compiles the micro-ROS agent). The image is
 `lidarbot-ros:humble`.
 
+The project is moving to ROS 2 Jazzy (Humble's support ends May 2027). Both releases build
+from the same Dockerfile and can exist side by side:
+
+```bash
+ROS_DISTRO=jazzy docker compose build     # image lidarbot-ros:jazzy
+ROS_DISTRO=jazzy ./up nav                 # run the stack on Jazzy; plain ./up stays on Humble
+```
+
+On Jazzy, `./up nav` uses `config/nav2_jazzy.yaml` (Jazzy's Nav2 starts extra nodes that
+need their own settings). `tools/replay_amcl.py` checks a release against a recorded run
+without the robot.
+
 ## Local settings
 
 ```bash
@@ -74,9 +86,10 @@ cp config/robot_info.example.json config/robot_info.json
 
 Set `camera_ip` once you know it (next chapter), or `""` if your kit has no Wi-Fi camera.
 
-Two settings live in `docker-compose.yml` and can be overridden from the environment:
+Three settings live in `docker-compose.yml` and can be overridden from the environment:
 
 | Variable | Default | Meaning |
 |---|---|---|
+| `ROS_DISTRO` | `humble` | `humble` or `jazzy`; picks the image `lidarbot-ros:<distro>` |
 | `ROS_DOMAIN_ID` | `77` | Must match the domain ID you give the robot |
 | `CAR_TYPE` | `ptz` | `ptz` (Superior kit), `no_ptz` or `basic_car`; picks the robot model |

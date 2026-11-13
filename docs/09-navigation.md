@@ -75,3 +75,49 @@ at the kitchen start, which looks down a narrow strip, gave answers spread over 
 matched against a single earlier scan instead and showed a consistent 3 deg "AMCL error" that
 was really the matcher trading heading for sideways shift. For centimeter ground truth, use
 the tape and overhead camera or ArUco markers.
+
+## Checking a new ROS release against a recorded run
+
+`tools/replay_amcl.py` plays a recorded Nav2 run (`datasets/raw/<run>`, see
+[recording](08-recording.md)) into a fresh AMCL and compares its pose, once per second, with
+the pose AMCL produced live on the robot. With `--nav` it starts the whole Nav2 bringup
+instead and also reports whether every Nav2 node reached the active state. The robot isn't
+needed; this is how we checked ROS 2 Jazzy before running it on the robot.
+
+Run it in a throwaway container with its own domain ID, so it can't talk to the live stack:
+
+```bash
+d=jazzy   # or humble
+docker run --rm -e ROS_DOMAIN_ID=92 \
+  -v $PWD/maps:/root/map -v $PWD/tools:/work/tools -v $PWD/config:/work/config:ro \
+  -v $PWD/datasets:/root/datasets lidarbot-ros:$d \
+  python3 /work/tools/replay_amcl.py /root/datasets/raw/<run> /root/datasets/nav/replay_$d.csv --rate 2 --nav
+```
+
+It uses `config/nav2_<distro>.yaml` if there is one, otherwise `config/nav2.yaml`.
+
+Results for the 7-minute tuned loop run of 2026-11-12 (difference from the live AMCL pose, first
+10 s skipped while AMCL settles):
+
+| Replay | Position: median / 95% / max | Heading: median / max |
+|---|---|---|
+| Humble, AMCL only | 1.1 / 2.6 / 3.4 cm | 0.36 / 2.13 deg |
+| Jazzy, AMCL only | 1.2 / 2.5 / 3.6 cm | 0.34 / 2.13 deg |
+| Humble, full Nav2 | 1.0 / 2.1 / 3.2 cm | 0.33 / 2.55 deg |
+| Jazzy, full Nav2 | 1.1 / 2.2 / 3.5 cm | 0.39 / 1.96 deg |
+
+The two releases match each other as closely as Humble matches itself. The replay isn't zero
+against the live run on either: AMCL's particle filter is random, and the bag plays at 2x.
+
+What Jazzy's Nav2 needed beyond the Humble settings (`config/nav2_jazzy.yaml`):
+
+- **Plugin names with `::`.** `nav2_navfn_planner::NavfnPlanner`; the old
+  `nav2_navfn_planner/NavfnPlanner` form stops the planner from starting.
+- **collision_monitor.** Jazzy's bringup puts it between the velocity smoother and the robot
+  (`cmd_vel_smoothed` -> `cmd_vel`). Ours slows the robot so its footprint never reaches a
+  lidar point within 1.2 s.
+- **docking_server.** Also started by Jazzy's bringup. One simple charging dock plugin, no
+  docks defined yet.
+- **Startup order in the replay.** Jazzy's costmaps fail if the odometry transform is
+  missing when they start. On the robot it is always there; in the replay the bag starts
+  first and AMCL is given the live starting pose.

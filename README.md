@@ -3,7 +3,9 @@
 A working ROS 2 Humble setup for the **Yahboom MicroROS V2** robot car
 (ESP32-S3, differential drive, T-mini Plus lidar, Wi-Fi pan/tilt camera), running
 in Docker on an Apple Silicon Mac. Yahboom only supports an x86 VMware image, which
-doesn't run on M-series Macs.
+doesn't run on M-series Macs. ROS 2 Jazzy builds from the same Dockerfile
+(`ROS_DISTRO=jazzy`); the project is moving to it, see
+[Mac setup](docs/02-mac-setup.md).
 
 With it you can:
 

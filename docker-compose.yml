@@ -3,7 +3,9 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile
-    image: lidarbot-ros:humble
+      args:
+        ROS_DISTRO: "${ROS_DISTRO:-humble}"   # humble | jazzy (migration in progress)
+    image: lidarbot-ros:${ROS_DISTRO:-humble}
     container_name: lidarbot
     environment:
       ROS_DOMAIN_ID: "${ROS_DOMAIN_ID:-77}"   # must match the robot's ros_domain_id
