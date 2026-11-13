@@ -25,3 +25,12 @@ def test_arrival_error() -> None:
 def test_arrival_error_wraps_heading() -> None:
     err = arrival_error((0.0, 0.0, math.radians(179)), (0.0, 0.0, math.radians(-179)))
     assert err.dyaw_deg == pytest.approx(2.0)
+
+
+def test_median_located() -> None:
+    from nav_loop import median_located
+    from scan_anchor import Located
+    locs = [Located(0.01, 0.02, 0.1, 0.009, 0.9), Located(0.5, 0.0, 0.0, 0.010, 0.8),
+            Located(0.02, 0.03, 0.12, 0.008, 0.95)]
+    m = median_located(locs)
+    assert (m.x, m.y, m.yaw) == (0.02, 0.02, 0.1)

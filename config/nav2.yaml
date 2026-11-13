@@ -4,7 +4,7 @@
 # - Footprint from the robot: wheels at x=+0.058 (track 0.171 m plus tyres), caster at
 #   x=-0.0665, bumper about 0.10 m ahead of base_footprint, body about 0.20 m wide.
 # - Speeds match tools/move.py (0.15 m/s, 0.5 rad/s), which the odometry was calibrated at.
-# - Goal tolerance 0.10 m / 0.15 rad so arrival accuracy can be measured.
+# - Goal tolerance 0.05 m / 0.08 rad.
 
 amcl:
   ros__parameters:
@@ -16,14 +16,21 @@ amcl:
     laser_model_type: likelihood_field
     laser_max_range: 8.0          # same as config/slam_toolbox.yaml
     laser_min_range: 0.2          # closer returns are the robot itself
-    max_beams: 90
+    max_beams: 180
+    # Nav2's defaults (sigma_hit 0.2 m, z_hit 0.5, z_rand 0.5) assume a noisy lidar; with them
+    # AMCL settled ~3 deg off in heading and barely moved on new scans (2026-11-12 loop).
+    sigma_hit: 0.05
+    z_hit: 0.9
+    z_rand: 0.1
+    laser_likelihood_max_dist: 1.0
     min_particles: 500
     max_particles: 2000
-    # Odometry is calibrated to ~0.1% (docs/07-calibration.md), so low motion noise.
-    alpha1: 0.05
-    alpha2: 0.05
-    alpha3: 0.05
-    alpha4: 0.05
+    # Motion noise. 0.05 everywhere (the odometry is calibrated to ~0.1%) made the particle
+    # cloud too tight: AMCL settled ~3 deg off in heading and couldn't correct itself.
+    alpha1: 0.2     # rotation noise from rotation
+    alpha2: 0.1     # rotation noise from translation
+    alpha3: 0.1     # translation noise from translation
+    alpha4: 0.1     # translation noise from rotation
     update_min_d: 0.10
     update_min_a: 0.10
     transform_tolerance: 1.0
@@ -58,8 +65,8 @@ controller_server:
     goal_checker:
       plugin: nav2_controller::SimpleGoalChecker
       stateful: true
-      xy_goal_tolerance: 0.10
-      yaw_goal_tolerance: 0.15
+      xy_goal_tolerance: 0.05     # 0.10 let it stop 6-9 cm short (2026-11-12 loops)
+      yaw_goal_tolerance: 0.08
     FollowPath:
       plugin: nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController
       desired_linear_vel: 0.15
@@ -68,7 +75,7 @@ controller_server:
       max_lookahead_dist: 0.6
       lookahead_time: 1.5
       use_velocity_scaled_lookahead_dist: false
-      rotate_to_heading_angular_vel: 0.5
+      rotate_to_heading_angular_vel: 0.3   # at 0.5 the robot coasted 4-8 deg past the goal heading
       use_rotate_to_heading: true
       rotate_to_heading_min_angle: 0.5
       max_angular_accel: 1.5

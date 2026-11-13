@@ -96,15 +96,21 @@ def set_initial_pose(node, x: float, y: float, yaw: float) -> None:
             rclpy.spin_once(node, timeout_sec=0.05)
 
 
-def navigate(node, tf, x: float, y: float, yaw: float, name: str) -> None:
-    import rclpy
-    from action_msgs.msg import GoalStatus
+def nav_client(node):
     from nav2_msgs.action import NavigateToPose
     from rclpy.action import ActionClient
     client = ActionClient(node, NavigateToPose, "navigate_to_pose")
     if not client.wait_for_server(timeout_sec=20.0):
         raise SystemExit("navigate_to_pose isn't available; is ./up nav running?")
-    start_pose = map_pose(node, tf)
+    return client
+
+
+def drive_goal(node, tf, client, x: float, y: float, yaw: float
+               ) -> tuple[str, float, tuple[float, float, float] | None]:
+    """Send one goal and wait for it: (status, seconds, settled map pose or None)."""
+    import rclpy
+    from action_msgs.msg import GoalStatus
+    from nav2_msgs.action import NavigateToPose
     goal = NavigateToPose.Goal()
     goal.pose.header.frame_id = "map"
     goal.pose.header.stamp = node.get_clock().now().to_msg()
@@ -116,7 +122,7 @@ def navigate(node, tf, x: float, y: float, yaw: float, name: str) -> None:
     rclpy.spin_until_future_complete(node, fut)
     handle = fut.result()
     if not handle.accepted:
-        raise SystemExit("goal rejected")
+        return "rejected", 0.0, map_pose(node, tf)
     res = handle.get_result_async()
     rclpy.spin_until_future_complete(node, res)
     elapsed = time.monotonic() - t0
@@ -125,7 +131,13 @@ def navigate(node, tf, x: float, y: float, yaw: float, name: str) -> None:
     end = time.monotonic() + SETTLE_S
     while time.monotonic() < end:
         rclpy.spin_once(node, timeout_sec=0.1)
-    pose = map_pose(node, tf)
+    return status, elapsed, map_pose(node, tf)
+
+
+def navigate(node, tf, x: float, y: float, yaw: float, name: str) -> None:
+    client = nav_client(node)
+    start_pose = map_pose(node, tf)
+    status, elapsed, pose = drive_goal(node, tf, client, x, y, yaw)
     if pose is None:
         print(f"{name}: {status} in {elapsed:.0f} s, but no map pose to measure")
         return
