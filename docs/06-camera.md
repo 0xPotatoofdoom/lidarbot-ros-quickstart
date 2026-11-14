@@ -1,11 +1,20 @@
 # 6. Camera and pan/tilt
 
-The camera is a separate ESP32 with its own IP address. It serves MJPEG at
-`http://<camera_ip>:81/stream` (640x480, about 2-3 fps over Wi-Fi). You can open that
-URL in a browser to check it.
+The camera is a separate ESP32-S3 module (board name `ESP-S3-YAHBOOM`, 2MP GC2145 sensor)
+with its own IP address. It serves MJPEG at `http://<camera_ip>:81/stream`: 320x240 at
+about 6 fps on our Wi-Fi (measured 2026-11-13). You can open that URL in a browser to check
+it; `http://<camera_ip>/status` shows its settings. Yahboom's firmware accepts resolution
+changes through `/control` but keeps sending 320x240.
 
 `./up` starts Yahboom's `camera_driver`, which keeps the stream open and publishes
-`/camera/image_raw`, then points the camera at the floor just ahead of the robot.
+`/camera/image_raw`, then points the camera at the floor just ahead of the robot. The driver
+upscales every frame to 640x480, so the ROS images have no more detail than 320x240.
+
+By default the module also runs its own open Wi-Fi hotspot (`Yahboom_ESP32_WIFI`, no
+password, 192.168.4.1) alongside your network, and anyone in range can view the camera
+through it. To turn it off, connect the module's USB-C port to a computer and send
+`wifi_mode:1` at 115200 baud with no line ending; it replies `OK`. `wifi_ver` shows the
+firmware version.
 
 ## Stale frames
 
