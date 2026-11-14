@@ -1,0 +1,5 @@
+# Same layout as Yahboom's firmware. Only the app (0x10000) is ever flashed, so the nvs
+# partition, which holds the Wi-Fi settings, is left where it is and keeps working.
+# Name,   Type, SubType, Offset,   Size
+factory,  app,  factory, 0x10000,  0x3b6000
+nvs,      data, nvs,     0x3c6000, 0x4000

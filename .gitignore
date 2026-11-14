@@ -21,3 +21,9 @@ maps/*
 # Recorded datasets (may contain images of your home)
 datasets/
 .venv-hf/
+
+# ESP-IDF build output
+firmware/*/build/
+firmware/*/managed_components/
+firmware/*/sdkconfig
+firmware/*/sdkconfig.old

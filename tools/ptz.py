@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Aim the camera pan/tilt mount and wait until it reports the new angle.
 
-./ros python3 /work/tools/ptz.py PAN TILT     degrees; pan -90..90, tilt -80..20 (+6 is level on ours)
+./ros python3 /work/tools/ptz.py PAN TILT     degrees; pan -90..90, tilt -90..15 (-45, the power-on
+                                              position, faces forward on ours since 2026-11-13)
 The firmware ignores this while the USB gamepad receiver is plugged in.
 """
 from __future__ import annotations
@@ -15,7 +16,9 @@ from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data
 
 PAN_LIMITS = (-90.0, 90.0)
-TILT_LIMITS = (-80.0, 20.0)   # below about -80 the servo stalls on its stop and can drop the camera
+# Measured with tools/ptz_range.py after the horn was re-seated (2026-11-13): the tilt moves
+# freely from -90 to at least +15; above +15 is untested.
+TILT_LIMITS = (-90.0, 15.0)
 
 
 def clamp(v: float, lo_hi: tuple[float, float]) -> float:
