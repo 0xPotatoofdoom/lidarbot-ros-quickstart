@@ -3,7 +3,8 @@
 
 Face a wall 1-2 m away with bare floor in front of it (the 1 m tape run facing the door is
 fine), then:
-    ./ros python3 /work/tools/tilt_check.py               # sweep -15..+6 in 3 deg steps
+    ./ros python3 /work/tools/tilt_check.py               # sweep -15..+6 in 3 deg steps (old horn)
+    ./ros python3 /work/tools/tilt_check.py --cmds -60 -57 -54 -51 -48 -45 -42 -39 -36   # current
     ./ros python3 /work/tools/tilt_check.py --cmds -70 -65 -60
 
 For each command it finds the row where the floor meets the wall, and with the lidar's
@@ -15,6 +16,10 @@ Measured 2026-11-12 before re-seating the tilt horn: level at -60.9, 1.000 scale
 stop near -80. Don't command below the stop: at -90 the stalled servo dropped the camera.
 After re-seating the horn: level at +5.9, 1.008 scale (1.1 deg rms; the servo moves in
 uneven 2-4 deg steps).
+Horn re-seated again (2026-11-13) so the power-on position faces forward: level at -40.0,
+0.872 scale (0.43 deg rms, wall 1.59 m; --cmds -60 -57 ... -36). Power-on -45 is 4.3 deg
+down. At 0.77 m from the wall the floor line left the frame near level and the fit broke:
+stay 1.2-2 m away.
 """
 from __future__ import annotations
 

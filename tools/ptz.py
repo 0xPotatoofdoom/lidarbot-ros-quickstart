@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Aim the camera pan/tilt mount and wait until it reports the new angle.
 
-./ros python3 /work/tools/ptz.py PAN TILT     degrees; pan -90..90, tilt -90..15 (-45, the power-on
-                                              position, faces forward on ours since 2026-11-13)
+./ros python3 /work/tools/ptz.py PAN TILT     degrees; pan -90..90, tilt -90..15 (-40 is level on
+                                              ours since 2026-11-13; power-on -45 is 4 deg down)
 The firmware ignores this while the USB gamepad receiver is plugged in.
 """
 from __future__ import annotations

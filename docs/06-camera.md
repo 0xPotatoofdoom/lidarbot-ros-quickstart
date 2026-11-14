@@ -46,13 +46,13 @@ after you ask:
 ## Pan/tilt (Superior kit)
 
 ```bash
-./ros python3 /work/tools/ptz.py 0 -56    # pan, tilt in degrees
+./ros python3 /work/tools/ptz.py 0 -53    # pan, tilt in degrees
 ```
 
 | | Command range | |
 |---|---|---|
 | Pan | -90 to 90 | 0 = straight ahead |
-| Tilt | -90 to 15 | positive = up; on our robot -45 (the power-on position) faces forward and `./up` aims at -56, about 11 deg down |
+| Tilt | -90 to 15 | positive = up; on our robot -40 is level (0.87 real deg per commanded deg), the power-on -45 is 4 deg down, and `./up` aims at -53, about 11 deg down |
 
 The command maps 1:1 onto real degrees, but where 0 points depends on how the servo horn
 sits on its spline. On our robot it had slipped so far that level needed -61 and the camera
