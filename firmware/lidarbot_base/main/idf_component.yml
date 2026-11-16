@@ -1,0 +1,6 @@
+dependencies:
+  idf: ">=5.2"
+  # micro-ROS for ESP-IDF, Jazzy branch, pinned so builds are repeatable.
+  micro_ros_espidf_component:
+    git: https://github.com/micro-ROS/micro_ros_espidf_component.git
+    version: 5cd71f525eedc1e59a48e3a12184ba75b60b05b7
