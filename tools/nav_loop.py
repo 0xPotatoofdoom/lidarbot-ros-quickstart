@@ -24,6 +24,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from nav_goal import arrival_error, drive_goal, map_pose, nav_client  # noqa: E402
+from power_meter import PowerMeter  # noqa: E402
 from scan_anchor import Located, ScanAnchor, plausible  # noqa: E402
 
 MAP_YAML = "/root/map/home.yaml"
@@ -104,6 +105,27 @@ class Scans:
         return list(self.recent)[-n:]
 
 
+class Odometer:
+    """Path length driven, for energy per metre. From the wheel odometry (/odom_raw): adding up
+    the EKF's /odom steps also adds up its jitter (2026-11-16: 21 m for a loop of about 15 m)."""
+    def __init__(self, node) -> None:
+        from nav_msgs.msg import Odometry
+        from rclpy.qos import qos_profile_sensor_data
+        self.meters = 0.0
+        self._last: tuple[float, float] | None = None
+        node.create_subscription(Odometry, "/odom_raw", self._on_odom, qos_profile_sensor_data)
+
+    def _on_odom(self, msg) -> None:
+        p = (msg.pose.pose.position.x, msg.pose.pose.position.y)
+        if self._last is not None:
+            self.meters += math.hypot(p[0] - self._last[0], p[1] - self._last[1])
+        self._last = p
+
+    def take(self) -> float:
+        m, self.meters = self.meters, 0.0
+        return m
+
+
 def locate(anchor: ScanAnchor, scans: list, guess_pose: tuple[float, float, float]) -> Located | None:
     """Median match of several scans; None if most fail or the result is implausibly far
     from guess_pose (which is in the same frame as anchor.odom0)."""
@@ -126,6 +148,8 @@ def run(laps: int, map_yaml: str) -> None:
     tf = Buffer()
     TransformListener(tf, node)
     scans = Scans(node)
+    power = PowerMeter(node)
+    odo = Odometer(node)
     walls = map_walls(map_yaml)
     repeat_anchors: dict[str, ScanAnchor] = {}
     client = nav_client(node)
@@ -133,15 +157,22 @@ def run(laps: int, map_yaml: str) -> None:
     out = OUT_DIR / time.strftime("loop_%Y%m%dT%H%M%SZ.csv", time.gmtime())
     out.write_text("unix_time,lap,name,status,seconds,goal_x,goal_y,goal_yaw_deg,amcl_x,amcl_y,amcl_yaw_deg,"
                    "amcl_err_cm,match_x,match_y,match_yaw_deg,match_err_cm,amcl_vs_match_cm,"
-                   "amcl_vs_match_deg,repeat_dx_cm,repeat_dy_cm,repeat_dyaw_deg\n")
+                   "amcl_vs_match_deg,repeat_dx_cm,repeat_dy_cm,repeat_dyaw_deg,leg_m,wh,mean_a,peak_a,wh_per_m\n")
     print(f"logging to {out}")
     try:
         for lap in range(1, laps + 1):
             for name, gx, gy, gyaw_deg in WAYPOINTS:
                 gyaw = math.radians(gyaw_deg)
+                power.take()
+                odo.take()
                 status, secs, amcl = drive_goal(node, tf, client, gx, gy, gyaw)
+                pw, leg_m = power.take(), odo.take()
+                per_m = pw.wh / leg_m if pw.wh is not None and leg_m > 0.05 else None
+                energy = (f" | {leg_m:.2f} m, {pw.wh * 1000:.0f} mWh ({per_m * 1000:.0f} mWh/m), "
+                          f"{pw.mean_a:.2f} A mean, {pw.peak_a:.2f} A peak"
+                          if pw.wh is not None and pw.mean_a is not None and per_m is not None else "")
                 if status != "succeeded" or amcl is None:
-                    print(f"lap {lap} {name}: {status}; stopping")
+                    print(f"lap {lap} {name}: {status}; stopping{energy}")
                     return
                 live = scans.fresh()
                 amcl_err = arrival_error((gx, gy, gyaw), amcl)
@@ -161,7 +192,7 @@ def run(laps: int, map_yaml: str) -> None:
                 if rep:
                     line += (f" | vs lap 1: {rep.x * 100:+.1f}, {rep.y * 100:+.1f} cm, "
                              f"{math.degrees(rep.yaw):+.1f} deg")
-                print(line, flush=True)
+                print(line + energy, flush=True)
                 with out.open("a") as f:
                     f.write(",".join([
                         f"{time.time():.1f}", str(lap), name, status, f"{secs:.1f}", str(gx), str(gy), str(gyaw_deg),
@@ -171,7 +202,9 @@ def run(laps: int, map_yaml: str) -> None:
                         fmt(t_err.dist_m if t_err else None, 100), fmt(a_vs_t.dist_m if a_vs_t else None, 100),
                         fmt(a_vs_t.dyaw_deg if a_vs_t else None, 1, 2),
                         fmt(rep.x if rep else None, 100), fmt(rep.y if rep else None, 100),
-                        fmt(math.degrees(rep.yaw) if rep else None, 1, 2)]) + "\n")
+                        fmt(math.degrees(rep.yaw) if rep else None, 1, 2),
+                        f"{leg_m:.3f}", fmt(pw.wh, 1, 4), fmt(pw.mean_a, 1, 3), fmt(pw.peak_a, 1, 3),
+                        fmt(per_m, 1, 4)]) + "\n")
     except KeyboardInterrupt:
         print("interrupted; cancel the Nav2 goal with ./up nav (restart) if the robot is still moving")
     finally:

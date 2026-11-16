@@ -5,7 +5,9 @@ The firmware publishes the pack voltage on /battery (std_msgs/Float32, ~5 Hz) an
 beeps below 10.2 V. This node (started by ./up) adds:
   /battery_state   sensor_msgs/BatteryState at 1 Hz: smoothed voltage, charge estimate
   datasets/battery/battery_YYYYMMDD.csv, every LOG_PERIOD seconds:
-      unix_time,voltage,voltage_min,moving,rest_voltage,percent
+      unix_time,voltage,voltage_min,moving,rest_voltage,percent,current_a,current_peak_a,power_w,wh,wh_since_boot
+  (the current and energy columns come from the INA228 on /power and /power_used_wh, open
+  firmware only: mean and peak draw over each row's period, energy used during it)
 Voltage sags while the motors draw current, so the charge estimate only updates
 from the *resting* voltage: the median once the robot has been still for REST_AFTER s.
 The voltage -> percent curve comes from config/battery.yaml (a generic Li-ion
@@ -14,6 +16,7 @@ curve until we fit our own from a full discharge).
 from __future__ import annotations
 
 import statistics
+import sys
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -27,11 +30,16 @@ from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Float32
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from power_meter import PowerMeter, fmt  # noqa: E402
+
 CONFIG = Path("/work/config/battery.yaml")
 LOG_DIR = Path("/root/datasets/battery")
 WINDOW_S = 5.0          # smoothing window
 REST_AFTER = 20.0       # s without drive commands before the voltage counts as resting
-LOG_PERIOD = 5.0        # s between log rows
+LOG_PERIOD = 1.0        # s between log rows
+HEADER = ("unix_time,voltage,voltage_min,moving,rest_voltage,percent,"
+          "current_a,current_peak_a,power_w,wh,wh_since_boot\n")
 
 
 @dataclass(frozen=True)
@@ -69,6 +77,7 @@ class BatteryMonitor(Node):
         self.pub = self.create_publisher(BatteryState, "/battery_state", 10)
         self.create_subscription(Float32, "/battery", self._on_voltage, qos_profile_sensor_data)
         self.create_subscription(Twist, "/cmd_vel", self._on_cmd, 10)
+        self.power = PowerMeter(self)
         self.create_timer(1.0, self._publish)
         self.create_timer(LOG_PERIOD, self._log)
         LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -114,19 +123,29 @@ class BatteryMonitor(Node):
         msg.cell_voltage = [v / self.cells] * self.cells
         self.pub.publish(msg)
 
+    def _log_path(self) -> Path:
+        """Today's log; a file started with the older columns is left alone and a _2 file used."""
+        day = time.strftime('%Y%m%d', time.gmtime())
+        for path in (LOG_DIR / f"battery_{day}.csv", LOG_DIR / f"battery_{day}_2.csv"):
+            if not path.exists() or path.open().readline() == HEADER:
+                return path
+        raise RuntimeError(f"no battery log file with the current columns for {day}")
+
     def _log(self) -> None:
         v = self.voltage()
+        p = self.power.take()
         if v is None:
             return
         vmin = min(x for _, x in self.samples)
-        path = LOG_DIR / f"battery_{time.strftime('%Y%m%d', time.gmtime())}.csv"
+        path = self._log_path()
         new = not path.exists()
         with path.open("a") as f:
             if new:
-                f.write("unix_time,voltage,voltage_min,moving,rest_voltage,percent\n")
+                f.write(HEADER)
             rest, pct = self.rest_voltage, self.percent()
             f.write(f"{time.time():.1f},{v:.3f},{vmin:.3f},{int(self.moving())},"
-                    f"{'' if rest is None else f'{rest:.3f}'},{'' if pct is None else f'{pct:.1f}'}\n")
+                    f"{'' if rest is None else f'{rest:.3f}'},{'' if pct is None else f'{pct:.1f}'},"
+                    f"{fmt(p.mean_a)},{fmt(p.peak_a)},{fmt(p.mean_w, 2)},{fmt(p.wh, 4)},{fmt(p.wh_total, 3)}\n")
 
 
 def main() -> None:
