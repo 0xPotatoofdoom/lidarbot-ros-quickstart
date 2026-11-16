@@ -1,0 +1,17 @@
+/* 38 kHz IR receiver output on header pin 12 = PI1 (output is active low). */
+/dts-v1/;
+/plugin/;
+/ {
+	compatible = "allwinner,sun50i-h616";
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			rover_ir: ir-receiver@0 {
+				compatible = "gpio-ir-receiver";
+				gpios = <&pio 8 1 1>;
+				linux,rc-map-name = "rc-empty";
+				status = "okay";
+			};
+		};
+	};
+};

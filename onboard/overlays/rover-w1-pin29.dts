@@ -1,0 +1,16 @@
+/* One-wire bus (DS18B20s) on header pin 29 = PI0 (pin 7 can't be pulled high on this board, 2026-11-16). Data line pulled up to 3.3 V by the adapter board. */
+/dts-v1/;
+/plugin/;
+/ {
+	compatible = "allwinner,sun50i-h616";
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			rover_onewire: onewire@0 {
+				compatible = "w1-gpio";
+				gpios = <&pio 8 0 0>;
+				status = "okay";
+			};
+		};
+	};
+};

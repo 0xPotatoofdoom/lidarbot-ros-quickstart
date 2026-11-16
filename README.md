@@ -59,7 +59,8 @@ Open Foxglove, connect to `ws://localhost:8765`, and add a 3D panel for `/scan` 
 7. [Calibrating odometry](docs/07-calibration.md)
 8. [Recording datasets](docs/08-recording.md)
 9. [Navigating with Nav2](docs/09-navigation.md)
-9. [Troubleshooting and known issues](docs/troubleshooting.md)
+10. [Onboard computer: Orange Pi Zero 2W](docs/10-onboard-computer.md)
+11. [Troubleshooting and known issues](docs/troubleshooting.md)
 
 ## Status
 
