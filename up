@@ -62,6 +62,8 @@ CAMERA_IP=$(.venv/bin/python -c 'import json; print(json.load(open("config/robot
 if [ -n "$CAMERA_IP" ]; then
   ./ros -d bash -c "ros2 run microros_v2_bringup camera_driver --ros-args -p camera_url:=http://${CAMERA_IP}:81/stream -p startup_delay:=0.5 > /tmp/camera.log 2>&1"
   ./ros -d bash -c 'python3 /work/tools/jpeg_republisher.py --ros-args > /tmp/jpeg.log 2>&1'
+  # Low obstacles (toys, socks) the lidar passes over -> Nav2's camera_layer.
+  ./ros -d bash -c 'python3 /work/tools/floor_obstacles.py --ros-args > /tmp/floor.log 2>&1'
   if [ "${CAR_TYPE:-ptz}" = "ptz" ]; then
     # About 11 deg below level: level is -40, 0.87 real deg per commanded deg
     # (tools/tilt_check.py, 2026-11-13, after the horn was re-seated).

@@ -105,7 +105,7 @@ local_costmap:
       height: 3
       resolution: 0.05
       footprint: "[[0.11, 0.105], [0.11, -0.105], [-0.12, -0.105], [-0.12, 0.105]]"
-      plugins: [obstacle_layer, inflation_layer]
+      plugins: [obstacle_layer, camera_layer, inflation_layer]
       obstacle_layer:
         plugin: nav2_costmap_2d::ObstacleLayer
         observation_sources: scan
@@ -118,6 +118,30 @@ local_costmap:
           raytrace_max_range: 4.0
           obstacle_max_range: 3.5
           obstacle_min_range: 0.2
+      camera_layer:
+        # Low obstacles the lidar's beam passes over, from tools/floor_obstacles.py. A layer of
+        # its own: in the lidar's layer, every scan would clear these cells again.
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: obstacles free
+        obstacles:
+          topic: /camera_obstacles
+          data_type: PointCloud2
+          marking: true
+          clearing: false
+          min_obstacle_height: 0.0
+          max_obstacle_height: 0.5
+          obstacle_max_range: 1.6
+          obstacle_min_range: 0.0
+        free:
+          topic: /camera_floor_free
+          data_type: PointCloud2
+          marking: false
+          clearing: true
+          min_obstacle_height: 0.0
+          max_obstacle_height: 0.5
+          raytrace_max_range: 1.6
+          raytrace_min_range: 0.0
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         inflation_radius: 0.30
@@ -133,7 +157,7 @@ global_costmap:
       resolution: 0.05
       track_unknown_space: true
       footprint: "[[0.11, 0.105], [0.11, -0.105], [-0.12, -0.105], [-0.12, 0.105]]"
-      plugins: [static_layer, obstacle_layer, inflation_layer]
+      plugins: [static_layer, obstacle_layer, camera_layer, inflation_layer]
       static_layer:
         plugin: nav2_costmap_2d::StaticLayer
         map_subscribe_transient_local: true
@@ -149,6 +173,30 @@ global_costmap:
           raytrace_max_range: 4.0
           obstacle_max_range: 3.5
           obstacle_min_range: 0.2
+      camera_layer:
+        # Low obstacles the lidar's beam passes over, from tools/floor_obstacles.py. A layer of
+        # its own: in the lidar's layer, every scan would clear these cells again.
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        enabled: true
+        observation_sources: obstacles free
+        obstacles:
+          topic: /camera_obstacles
+          data_type: PointCloud2
+          marking: true
+          clearing: false
+          min_obstacle_height: 0.0
+          max_obstacle_height: 0.5
+          obstacle_max_range: 1.6
+          obstacle_min_range: 0.0
+        free:
+          topic: /camera_floor_free
+          data_type: PointCloud2
+          marking: false
+          clearing: true
+          min_obstacle_height: 0.0
+          max_obstacle_height: 0.5
+          raytrace_max_range: 1.6
+          raytrace_min_range: 0.0
       inflation_layer:
         plugin: nav2_costmap_2d::InflationLayer
         inflation_radius: 0.35
