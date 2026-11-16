@@ -1,0 +1,4 @@
+# Same layout as Yahboom's firmware, so only the app at 0x10000 is replaced.
+phy_init, data, phy,     0xf000,   0x1000,
+factory,  app,  factory, 0x10000,  0x177000,
+nvs,      data, nvs,     0x187000, 0x6000,
