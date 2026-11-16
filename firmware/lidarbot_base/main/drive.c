@@ -21,6 +21,10 @@ static const char *TAG = "drive";
 #define KP 0.6                    // duty per m/s of error
 #define KI 3.0                    // duty per m of accumulated error
 #define SPEED_FILTER 0.4          // new-sample weight for the measured wheel speed
+// With a zero target, short the motor (both inputs high: brake on this kind of H-bridge) while
+// the wheel still turns faster than this, then let go (both low: coast). Coasting alone rolled
+// 28 cm from 0.6 m/s (2026-11-16).
+#define BRAKE_ABOVE_MPS 0.02
 
 static const double M_PER_COUNT = M_PI * WHEEL_DIAMETER_M / COUNTS_PER_REV;
 
@@ -31,6 +35,7 @@ typedef struct {
     pcnt_unit_handle_t pcnt;
     int last_count;
     double speed, target, integral, duty;
+    bool brake;
 } wheel_t;
 
 static wheel_t s_wheel[2] = {
@@ -51,8 +56,13 @@ static void pwm_set(int ch, double frac) {
     ledc_update_duty(LEDC_LOW_SPEED_MODE, ch);
 }
 
-// duty -1..1 in the wheel's forward sense; 0 = coast (both inputs low)
+// duty -1..1 in the wheel's forward sense; 0 = coast (both inputs low); brake = both high
 static void wheel_output(wheel_t *w, double duty) {
+    if (w->brake) {
+        pwm_set(w->ch_a, 1.0);
+        pwm_set(w->ch_b, 1.0);
+        return;
+    }
     double d = duty * w->drive_sign;
     pwm_set(w->ch_a, d > 0 ? d : 0);
     pwm_set(w->ch_b, d < 0 ? -d : 0);
@@ -91,8 +101,10 @@ static double wheel_control(wheel_t *w, double dt) {
 
     if (w->target == 0.0) {
         w->integral = 0;
-        w->duty = 0;               // coast to a stop, as Yahboom's firmware does
+        w->duty = 0;
+        w->brake = fabs(w->speed) > BRAKE_ABOVE_MPS;
     } else {
+        w->brake = false;
         double err = w->target - w->speed;
         double ff = copysign(DUTY_START + DUTY_PER_MPS * fabs(w->target), w->target);
         double out = ff + KP * err + KI * (w->integral + err * dt);

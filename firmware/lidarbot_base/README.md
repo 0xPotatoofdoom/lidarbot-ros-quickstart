@@ -53,7 +53,10 @@ relays messages, and these message types are the same in both.
 | `/beep` (in) | `std_msgs/UInt16` | | milliseconds |
 
 Each wheel has a 100 Hz speed loop: feedforward (the motors need about 50% duty to start) plus
-PI on the encoder speed. A target of 0 lets the wheels coast to a stop, as Yahboom's firmware does.
+PI on the encoder speed. A target of 0 brakes the wheel (both motor inputs high) until it has
+stopped, then lets go; also after the 0.5 s command timeout. Stopping distance after a stop
+command, on the floor: 8 cm from 0.6 m/s (28 cm when coasting, as Yahboom's firmware does), 4 cm
+from 0.3 m/s.
 
 Checked on the stand (2026-11-16, wheels in the air):
 
@@ -65,6 +68,7 @@ Checked on the stand (2026-11-16, wheels in the air):
 | Turn on the spot 1.0 rad/s | 0.97-1.08 rad/s |
 | Command timeout | stopped about 0.6 s after the last `/cmd_vel` |
 | Draw | 0.30 A idle (lidar spinning), about 0.40 A with both wheels at 0.15 m/s |
+| Full load (floor) | 0.6 m/s held at 0.601-0.604, 0.66-0.75 A mean, 1.14 A peak, pack 11.5 -> 11.28 V |
 | Pan/tilt | left, right, up, down as commanded; a tilt request of +60 is capped at +20 |
 
 Odometry on the floor and Nav2 are not checked yet: Yahboom's firmware stays the reference for
