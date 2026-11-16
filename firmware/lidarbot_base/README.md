@@ -11,13 +11,11 @@ the calibration we measured with Yahboom's firmware (docs/07).
 
 | Phase | What | Status |
 |---|---|---|
-| 1 | Sensors: IMU, battery current (INA228), OLED status | **running** (2026-11-16) |
-| 2 | Driving: motors with PID speed control from the encoders, `/cmd_vel`, `/odom_raw`, lidar `/scan`, pan/tilt, buzzer | next |
+| 1 | Sensors: IMU, battery current (INA228), OLED status | **done** (2026-11-16) |
+| 2 | Driving: motors with PID speed control from the encoders, `/cmd_vel`, `/odom_raw`, lidar `/scan`, pan/tilt, buzzer | **running on the stand** (2026-11-16); floor calibration and Nav2 next |
 | 3 | micro-ROS over USB serial to the Orange Pi on the robot, instead of Wi-Fi | later |
 
 ## Phase 1
-
-Motors are held off and the pan/tilt servos hold the power-on position (pan 0, tilt -45).
 
 | Topic | Type | Rate | Notes |
 |---|---|---|---|
@@ -42,6 +40,35 @@ Measured on our robot (2026-11-16, robot still, Humble agent on the Mac):
 
 The firmware is built with micro-ROS Jazzy and works with our Humble agent: the agent only
 relays messages, and these message types are the same in both.
+
+## Phase 2
+
+| Topic | Type | Rate | Notes |
+|---|---|---|---|
+| `/odom_raw` | `nav_msgs/Odometry` | 25 Hz | `odom` -> `base_footprint`, from the encoders; Yahboom's covariances, so `odom_calibrator` and the EKF take it unchanged |
+| `/scan` | `sensor_msgs/LaserScan` | about 6 Hz | `laser_frame`, 667 rays from -pi to pi, 0.12-8 m, 0 = no echo (Yahboom's layout). Reliable QoS; decoded on the board from the T-mini Plus |
+| `/ptz_angle` | `geometry_msgs/Vector3` | 10 Hz | pan (x), tilt (y) in degrees, as commanded |
+| `/cmd_vel` (in) | `geometry_msgs/Twist` | | linear.x, angular.z. The wheels stop 0.5 s after the last command. Wheel speeds are capped at 0.6 m/s, scaling both together so the turn radius is kept |
+| `/cmd_ptz_angle` (in) | `geometry_msgs/Vector3` | | pan -90..90, tilt -90..20. Power-on position pan 0, tilt -40 (camera level) |
+| `/beep` (in) | `std_msgs/UInt16` | | milliseconds |
+
+Each wheel has a 100 Hz speed loop: feedforward (the motors need about 50% duty to start) plus
+PI on the encoder speed. A target of 0 lets the wheels coast to a stop, as Yahboom's firmware does.
+
+Checked on the stand (2026-11-16, wheels in the air):
+
+| | |
+|---|---|
+| Lidar angles | box straight ahead at 0 deg (-4 deg, box slightly off square), 0.405 m measured vs 16 in (0.406 m); a person behind-left at +122..+158 deg, so not mirrored |
+| Lidar packets | 0 bad out of 2215 |
+| Forward / reverse 0.15 m/s | 0.148-0.152 m/s measured, sideways drift about 1 cm over 0.6 m |
+| Turn on the spot 1.0 rad/s | 0.97-1.08 rad/s |
+| Command timeout | stopped about 0.6 s after the last `/cmd_vel` |
+| Draw | 0.30 A idle (lidar spinning), about 0.40 A with both wheels at 0.15 m/s |
+| Pan/tilt | left, right, up, down as commanded; a tilt request of +60 is capped at +20 |
+
+Odometry on the floor and Nav2 are not checked yet: Yahboom's firmware stays the reference for
+driving until they match docs/07.
 
 ## Build and flash
 
