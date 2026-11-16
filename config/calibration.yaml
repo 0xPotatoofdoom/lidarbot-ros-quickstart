@@ -4,12 +4,17 @@
 #   ./record run calib-linear  ./ros python3 /work/tools/calibrate.py linear 1.0
 # 1.0 = no correction. Values outside 0.5-2.0 are rejected.
 #
-# Measured 2026-11-11 on hardwood. Rotation: against lidar scan alignment (2 x 720 deg
-# turns each way; unaffected by lidar range errors). Distance: against a tape measure,
-# because the lidar over-reads range differences by about 3% (1.030 +- 0.007).
+# Measured 2026-11-16 in the kitchen with firmware/lidarbot_base (phase 2). Rotation: against
+# lidar scan alignment, 1 x 360 deg each way. Distance: against a tape on the floor, read by the
+# camera panned 90 deg right (tape at the image centre before and after), 0.9 m out and back.
+# Our own lidar decoding over-reads range differences by only 0.6-1.0% (Yahboom's: 3%).
 odom_calibrator:
   ros__parameters:
-    linear_scale: 0.982          # tape: 39.0 in out and back; /odom_raw pose 1.010, 1.009 m
-    angular_scale_left: 0.997    # CCW, /odom_raw pose: 0.9971
-    angular_scale_right: 0.996   # CW,  /odom_raw pose: 0.9961
-    imu_yaw_scale: 1.001         # /imu yaw over 4 runs: 1.0019, 1.0006, 1.0006, 1.0007
+    linear_scale: 0.990          # tape: 36.25 in out, 36.06 in back; /odom_raw pose 0.929, 0.926 m
+    angular_scale_left: 1.008    # CCW, /odom_raw pose: 1.0083
+    angular_scale_right: 1.005   # CW,  /odom_raw pose: 1.0047
+    imu_yaw_scale: 1.001         # /imu yaw: 1.0010, 1.0000
+#
+# With Yahboom's original firmware (measured 2026-11-11 on hardwood, 2 x 720 deg turns, tape
+# 39.0 in out and back) the values were: linear 0.982, angular left 0.997, right 0.996,
+# imu yaw 1.001. Use those if the board is flashed back to Yahboom's firmware.
