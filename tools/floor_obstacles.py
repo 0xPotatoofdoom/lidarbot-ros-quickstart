@@ -5,7 +5,7 @@
     ./ros python3 /work/tools/floor_obstacles.py --test IMAGE.jpg   (offline: writes IMAGE_floor.jpg)
 
 The lidar scans a plane about 15 cm up, so a dog toy or a sock is invisible to Nav2. The camera
-looks down at the floor ahead while driving (tilt -53, about 8 degrees below level). Each frame:
+looks down at the floor ahead while driving (tilt -53, 8.7 degrees below level). Each frame:
 
   1. learn the floor's colours from the whole visible floor (hue/saturation histogram, blended
      over frames): obstacles are small, so their colours are rare there; mark pixels with rare
@@ -14,7 +14,7 @@ looks down at the floor ahead while driving (tilt -53, about 8 degrees below lev
   2. in each image column, the lowest run of non-floor pixels belongs to the nearest object;
      the object meets the floor at its blob's lowest row (a rounded object's sides would
      otherwise project further away and stretch it along the view)
-  3. that row and column go through the camera model onto the floor plane (camera 0.12 m up,
+  3. that row and column go through the camera model onto the floor plane (camera 0.1175 m up,
      pitched down by the measured angle), giving a point in base_footprint
 
 Published, for a separate Nav2 obstacle layer (the lidar layer would clear these cells, its
@@ -39,10 +39,12 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-CAM_HEIGHT_M = 0.12        # optical centre above the floor (tools/tilt_check.py)
-CAM_X_M = 0.05             # optical centre ahead of base_footprint (lidar is at -0.028)
+CAM_HEIGHT_M = 0.1175      # lens above the floor, tape-measured 2026-11-16 (4 5/8 in)
+CAM_X_M = 0.06             # lens ahead of base_footprint: 9 cm ahead of the lidar (-0.028),
+                           # wall target distance vs lidar range, 2026-11-16
 DRIVE_TILT = -53.0         # ./up aims the camera here for driving
-PITCH_AT_DRIVE_DEG = 8.4   # measured 2026-11-16: wall/floor line row vs lidar wall distance
+PITCH_AT_DRIVE_DEG = 8.7   # 2026-11-16: wall target's centre row with tape-measured heights
+                           # (the wall/floor line gave 8.4); level is about tilt -42.5
 TILT_SCALE = 0.872         # real degrees per commanded degree (tools/tilt_check.py)
 MAX_RANGE_M = 1.5          # ignore anything further: the floor is too foreshortened
 REF_ROWS = (420, 480)      # strip just ahead (about 0.32-0.36 m), drawn for reference only

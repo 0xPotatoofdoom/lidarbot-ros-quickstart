@@ -52,7 +52,7 @@ after you ask:
 | | Command range | |
 |---|---|---|
 | Pan | -90 to 90 | 0 = straight ahead |
-| Tilt | -90 to 15 | positive = up; on our robot -40 is level (0.87 real deg per commanded deg), the power-on -45 is 4 deg down, and `./up` aims at -53, about 11 deg down |
+| Tilt | -90 to 15 | positive = up; on our robot level is about -42.5 (2026-11-16, wall target below; `tilt_check.py` said -40 on 2026-11-13), and `./up` aims at -53, 8.7 deg down |
 
 The command maps 1:1 onto real degrees, but where 0 points depends on how the servo horn
 sits on its spline. On our robot it had slipped so far that level needed -61 and the camera
@@ -68,6 +68,26 @@ command that is level. It only measures angles where the floor line is in view (
 either side of level); further down, ours turned out steeper than 1:1 (-15 pointed about
 35 deg down, not 21). Before the horn was re-seated the tilt stalled on a stop near -80 and
 the stalled servo dropped the camera off Wi-Fi.
+
+### Camera pitch from the wall target
+
+The ArUco board on the wall (`tools/wall_target.py`, IDs 10-13) gives the camera's pitch
+directly, once two heights are tape-measured: the lens above the floor and the board centre
+above the floor. The board centre's image row, the focal length (about 1000 px) and the
+board's elevation above the lens give how far below level the camera points; PnP's own pitch
+is not reliable with this narrow lens (pitch and height trade off, like yaw and sideways).
+Measured 2026-11-16, lens 0.1175 m (4 5/8 in), board centre 0.194 m (7 5/8 in), board 1.64 m
+from the lens:
+
+| Tilt command | -30 | -35 | -40 | -45 | -50 | -53 |
+|---|---|---|---|---|---|---|
+| Camera points | 10.5 up | 7.7 up | 2.3 up | 2.4 down | 7.0 down | 8.7 down |
+
+So level is about -42.5, and the driving tilt -53 is 8.7 deg down (the wall/floor line method
+gave 8.4). The same snapshots put the lens 9 cm ahead of the lidar (camera distance to the
+board vs lidar range straight ahead). `tools/floor_obstacles.py` uses these numbers. The
+tool's lidar wall fit needs one clean straight wall; at a cluttered spot (chair, corner) it
+fails and its heading and sideways numbers are meaningless.
 
 ### Finding the real range without limit switches
 

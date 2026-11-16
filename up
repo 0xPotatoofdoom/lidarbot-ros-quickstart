@@ -65,8 +65,8 @@ if [ -n "$CAMERA_IP" ]; then
   # Low obstacles (toys, socks) the lidar passes over -> Nav2's camera_layer.
   ./ros -d bash -c 'python3 /work/tools/floor_obstacles.py --ros-args > /tmp/floor.log 2>&1'
   if [ "${CAR_TYPE:-ptz}" = "ptz" ]; then
-    # About 11 deg below level: level is -40, 0.87 real deg per commanded deg
-    # (tools/tilt_check.py, 2026-11-13, after the horn was re-seated).
+    # 8.7 deg below level (wall target with tape-measured heights, 2026-11-16; level is
+    # about -42.5 now, not the -40 tools/tilt_check.py found on 2026-11-13).
     ( sleep 8 && ./ros python3 /work/tools/ptz.py 0 -53 >/dev/null 2>&1 ) &
   fi
 fi
