@@ -47,7 +47,7 @@ lap's arrival there (how repeatable the arrivals are). Rows go to `datasets/nav/
 ## Results on our robot
 
 Home map, loop from the kitchen through the main room and hallway to a den doorway, the far
-end of the living room and back (about 15 m), 2026-11-12. 45 goals, all succeeded, 52-79 s
+end of the living room and back (about 21 m by wheel odometry), 2026-11-12. 45 goals, all succeeded, 52-79 s
 each.
 
 | Settings | Distance from goal | Heading error |
@@ -75,6 +75,46 @@ at the kitchen start, which looks down a narrow strip, gave answers spread over 
 matched against a single earlier scan instead and showed a consistent 3 deg "AMCL error" that
 was really the matcher trading heading for sideways shift. For centimeter ground truth, use
 the tape and overhead camera or ArUco markers.
+
+## Low obstacles: the camera layer
+
+The lidar scans a plane about 15 cm up, so toys, socks and cables are invisible to it: on
+2026-11-16 the robot pushed a dog toy along with its front wheel. `tools/floor_obstacles.py`
+(started by `./up` with the camera) looks for them in the camera image while the camera points
+ahead at the driving tilt (pan 0, tilt -53):
+
+- it learns the floor's colours from the visible floor, marks blobs with rare colours, drops
+  blobs smaller than a toy and blobs that would stand less than 3 cm tall (floor grain, stains),
+  and ignores bright colourless glare
+- each blob's lowest row is where it meets the floor; the camera model (0.12 m up, 8.4 deg down,
+  fx about 1000) turns that into a point ahead of the robot, padded by 5 cm
+- the points go to `camera_layer`, a separate obstacle layer in both costmaps (in the lidar's
+  layer, every scan would clear them again: its beam passes over the toy)
+
+The camera sees about 35 deg across, from 0.3 m to 1.5 m ahead, about 0.4 s late at 5 fps.
+
+| Test (2026-11-16) | Result |
+|---|---|
+| Toy 0.75 m ahead | detected at 0.74 m; plan went 26 cm around it, the robot passed 13 cm out (the controller cuts corners) without touching it |
+| Full loop with dog toys placed along it | 3 of 3 goals, 2.4-4.7 cm, all toys avoided; one backup early on a false alarm; legs about 10 s slower |
+
+Misses and false alarms to know about: white or grey objects read as glare and are missed;
+dark floor patches taller than 3 cm in the image, skirting-board edges and similar give small
+false points (harmless next to walls, but one caused a backup). Before the 2026-11-16 fix, the
+black corners left by lens undistortion were an "obstacle" 0.35 m ahead in every frame, and
+the controller refused to move.
+
+## Changing surroundings
+
+A goal that something now blocks fails safely. On 2026-11-16 the den door was half closed,
+then fully closed, across the den-door goal: Nav2 drove to 18 cm from the door, its
+"collision ahead" check refused to go closer, spin and backup recoveries failed the same way,
+and the goal aborted after about 40 s. Nothing was pushed. The camera layer would have shown
+the door at once; the lidar view drawn on the map (`/scan` over the saved map at the stop)
+did.
+
+Energy, open firmware (`nav_loop.py` logs it per leg): 11-15 mWh per metre at 0.15 m/s,
+0.41 A mean (0.30 A parked), about 0.28 Wh per lap.
 
 ## Checking a new ROS release against a recorded run
 

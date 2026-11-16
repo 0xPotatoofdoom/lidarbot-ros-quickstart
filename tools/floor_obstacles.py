@@ -48,6 +48,7 @@ MAX_RANGE_M = 1.5          # ignore anything further: the floor is too foreshort
 REF_ROWS = (420, 480)      # strip just ahead (about 0.32-0.36 m), drawn for reference only
 REF_COLS = (200, 440)
 MIN_BLOB_PX = 250          # smaller non-floor blobs are noise (the toy at 1 m is about 2500)
+MIN_HEIGHT_M = 0.03        # blobs that would stand less tall than this are flat: floor stains, grain
 COL_STEP = 8               # columns sampled
 MIN_RUN = 6                # rows of non-floor in a column before it counts as an object
 FLOOR_PROB = 0.03          # colour bins rarer than this (fraction of the commonest) = not floor
@@ -62,6 +63,13 @@ class Camera:
     dist: np.ndarray
     pitch_deg: float
 
+    def valid(self, shape: tuple[int, int]) -> np.ndarray:
+        """Pixels that hold image after undistortion (the corners don't), shrunk a little."""
+        import cv2
+        white = np.full(shape, 255, np.uint8)
+        ok = cv2.undistort(white, self.k, self.dist) > 250
+        return cv2.erode(ok.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool)
+
     def floor_point(self, u: float, v: float) -> tuple[float, float] | None:
         """Image pixel (undistorted) -> (x forward, y left) on the floor in base_footprint."""
         fx, fy, cx, cy = self.k[0, 0], self.k[1, 1], self.k[0, 2], self.k[1, 2]
@@ -74,6 +82,17 @@ class Camera:
             return None                                # at or above the horizon
         t = CAM_HEIGHT_M / -zz
         return CAM_X_M + fw * t, l * t
+
+    def upright_height(self, bottom_row: float, top_row: float) -> float:
+        """Height of an upright object standing where bottom_row meets the floor and reaching
+        up to top_row (image centre column). A flat patch on the floor comes out low: for one
+        from d to d2 ahead, CAM_HEIGHT_M * (1 - d / d2)."""
+        cy, fy = self.k[1, 2], self.k[1, 1]
+        down = lambda v: math.radians(self.pitch_deg) + math.atan((v - cy) / fy)   # noqa: E731
+        if down(bottom_row) <= 0:
+            return math.inf
+        d = CAM_HEIGHT_M / math.tan(down(bottom_row))
+        return CAM_HEIGHT_M - d * math.tan(down(top_row))
 
 
 def pitch_for_tilt(tilt_cmd: float) -> float:
@@ -131,10 +150,16 @@ def detect(bgr: np.ndarray, cam: Camera, model: FloorModel) -> tuple[Detection, 
             top = v + 1
             break
     model.update(hsv, top)
-    mask = model.not_floor(hsv)
+    mask = model.not_floor(hsv) & cam.valid(img.shape[:2])   # the black undistortion corners
     mask[:top] = False
-    _, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
-    blob_bottom = stats[:, cv2.CC_STAT_TOP] + stats[:, cv2.CC_STAT_HEIGHT] - 1
+    # (2026-11-16: without this, the bottom-right corner was an obstacle 0.35 m ahead in every frame)
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask.astype(np.uint8), connectivity=8)
+    blob_top = stats[:, cv2.CC_STAT_TOP]
+    blob_bottom = blob_top + stats[:, cv2.CC_STAT_HEIGHT] - 1
+    # keep blobs that stand up; one cut off at the top row goes on up, so it counts as tall
+    upright = np.array([i > 0 and (blob_top[i] <= top or
+                        cam.upright_height(blob_bottom[i], blob_top[i]) >= MIN_HEIGHT_M) for i in range(n)])
+    mask = upright[labels]
     obstacles, free, rows = [], [], []
     for u in range(COL_STEP // 2, img.shape[1], COL_STEP):
         col = mask[top:, u]
