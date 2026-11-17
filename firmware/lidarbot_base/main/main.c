@@ -48,10 +48,14 @@
 #include <rmw_microros/rmw_microros.h>
 #include <sensor_msgs/msg/battery_state.h>
 #include "battery_guard.h"
+#include "commands.h"
+#include "esp_system.h"
+#include "transport.h"
 #include <sensor_msgs/msg/imu.h>
 #include <sensor_msgs/msg/laser_scan.h>
 #include <std_msgs/msg/float32.h>
 #include <std_msgs/msg/u_int16.h>
+#include <std_msgs/msg/u_int8.h>
 
 static const char *TAG = "base";
 
@@ -74,6 +78,7 @@ static bool s_power_ok;
 static double s_adc_v;
 static bool s_has_ina;
 static volatile bool s_ros_up;
+static transport_kind_t s_transport;   // decided once in app_main
 static uint32_t s_pub_fail;   // failed publishes, logged with the status
 static volatile batt_state_t s_batt_state = BATT_NO_PACK;   // for the OLED and log
 static double s_pan = 0, s_tilt = -40;      // -40 = camera level (measured 2026-11-12)
@@ -179,6 +184,24 @@ static void sim_set(bool on, double v) {
     else ESP_LOGW(TAG, "battery test mode off");
 }
 
+// "transport serial|udp" (saved, then restart) and "agent <ip> <port>" (saved for the next boot).
+static void settings_command(cmd_t c) {
+    if (c.kind == CMD_TRANSPORT_UDP || c.kind == CMD_TRANSPORT_SERIAL) {
+        transport_kind_t k = c.kind == CMD_TRANSPORT_SERIAL ? TRANSPORT_SERIAL : TRANSPORT_UDP;
+        esp_err_t err = transport_save(k);
+        if (err != ESP_OK) { ESP_LOGE(TAG, "could not save the transport: %s", esp_err_to_name(err)); return; }
+        ESP_LOGW(TAG, "transport %s saved; restarting%s", transport_name(k),
+                 k == TRANSPORT_SERIAL ? " (logs go quiet; hold KEY at power-on for UDP)" : "");
+        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_restart();
+    } else if (c.kind == CMD_AGENT) {
+        esp_err_t err = net_save_agent(c.ip, c.port);
+        if (err != ESP_OK) ESP_LOGE(TAG, "could not save the agent: %s", esp_err_to_name(err));
+        else ESP_LOGW(TAG, "agent %u.%u.%u.%u:%u saved; used from the next restart",
+                      c.ip[0], c.ip[1], c.ip[2], c.ip[3], c.port);
+    }
+}
+
 static void console_task(void *arg) {
     char line[48];
     size_t n = 0;
@@ -196,6 +219,7 @@ static void console_task(void *arg) {
             batt_cmd_t cmd = batt_parse_cmd(line, &v);
             if (cmd == BATT_CMD_SIM) sim_set(true, v);
             else if (cmd == BATT_CMD_SIM_OFF) sim_set(false, 0);
+            else settings_command(cmd_parse(line));
         }
         n = 0;
     }
@@ -264,6 +288,7 @@ static void status_task(void *arg) {
         if (s_batt_state == BATT_CRITICAL) snprintf(bottom, sizeof bottom, "BATT CRITICAL");
         else if (s_batt_state == BATT_LOW) snprintf(bottom, sizeof bottom, "BATT LOW");
         else if (s_ros_up) snprintf(bottom, sizeof bottom, "ROS OK %.1fW", pok ? p.power_w : 0.0);
+        else if (s_transport == TRANSPORT_SERIAL) snprintf(bottom, sizeof bottom, "AGENT USB...");
         else if (net_wifi_up()) snprintf(bottom, sizeof bottom, "AGENT...");
         else snprintf(bottom, sizeof bottom, "WIFI...");
         oled_lines(top, bottom);
@@ -292,8 +317,8 @@ static rcl_init_options_t s_init_opts;
 static rclc_support_t s_support;
 static rcl_node_t s_node;
 static rclc_executor_t s_exec;
-static rcl_publisher_t s_pub_imu, s_pub_battery, s_pub_power, s_pub_used, s_pub_odom, s_pub_scan, s_pub_ptz;
-static rcl_subscription_t s_sub_cmd, s_sub_ptz, s_sub_beep;
+static rcl_publisher_t s_pub_imu, s_pub_battery, s_pub_power, s_pub_used, s_pub_odom, s_pub_scan, s_pub_ptz, s_pub_guard;
+static rcl_subscription_t s_sub_cmd, s_sub_ptz, s_sub_beep, s_sub_sim;
 static sensor_msgs__msg__Imu s_imu_msg;
 static sensor_msgs__msg__BatteryState s_power_msg;
 static nav_msgs__msg__Odometry s_odom_msg;
@@ -303,6 +328,8 @@ static geometry_msgs__msg__Vector3 s_ptz_msg;
 static geometry_msgs__msg__Twist s_cmd_in;
 static geometry_msgs__msg__Vector3 s_ptz_in;
 static std_msgs__msg__UInt16 s_beep_in;
+static std_msgs__msg__UInt8 s_guard_msg;
+static std_msgs__msg__Float32 s_sim_in;
 static float s_ranges[SCAN_POINTS];
 static lidar_scan_t s_scan;
 static uint32_t s_scan_seq;
@@ -327,14 +354,24 @@ static void on_ptz(const void *m) {
 
 static void on_beep(const void *m) { beep(((const std_msgs__msg__UInt16 *)m)->data); }
 
+// /battery_sim: the console's "batt sim" as a topic (the console is off in serial mode).
+// Volts inside the test range start or change it, anything else (0) ends it.
+static void on_battery_sim(const void *m) {
+    double v = ((const std_msgs__msg__Float32 *)m)->data;
+    if (v > BATT_SIM_MIN_V && v < BATT_SIM_MAX_V) sim_set(true, v);
+    else sim_set(false, 0);
+}
+
 static bool ros_create(void) {
     memset(&s_support, 0, sizeof s_support);
     s_node = rcl_get_zero_initialized_node();
-    rcl_publisher_t *pubs[] = {&s_pub_imu, &s_pub_battery, &s_pub_power, &s_pub_used, &s_pub_odom, &s_pub_scan, &s_pub_ptz};
+    rcl_publisher_t *pubs[] = {&s_pub_imu, &s_pub_battery, &s_pub_power, &s_pub_used, &s_pub_odom, &s_pub_scan, &s_pub_ptz,
+                              &s_pub_guard};
     for (size_t i = 0; i < sizeof pubs / sizeof pubs[0]; i++) *pubs[i] = rcl_get_zero_initialized_publisher();
     s_sub_cmd = rcl_get_zero_initialized_subscription();
     s_sub_ptz = rcl_get_zero_initialized_subscription();
     s_sub_beep = rcl_get_zero_initialized_subscription();
+    s_sub_sim = rcl_get_zero_initialized_subscription();
     s_exec = rclc_executor_get_zero_initialized_executor();
 
     CHECK(rclc_support_init_with_options(&s_support, 0, NULL, &s_init_opts, &s_alloc));
@@ -343,20 +380,29 @@ static bool ros_create(void) {
     CHECK(rclc_publisher_init_best_effort(&s_pub_odom, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(nav_msgs, msg, Odometry), "odom_raw"));
     // A scan (about 2.7 KB) is bigger than one packet; only reliable streams can split it up.
     CHECK(rclc_publisher_init_default(&s_pub_scan, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, LaserScan), "scan"));
-    if (rmw_uros_set_publisher_session_timeout(rcl_publisher_get_rmw_handle(&s_pub_scan), SCAN_TIMEOUT_MS) != RMW_RET_OK)
+    // Over serial the acknowledgement takes tens of ms (a scan alone is 30 ms on the wire), and
+    // waiting for it held the 20 ms loop back (/imu 42 Hz instead of 50). With 0 the scan is
+    // still queued and resent until acknowledged by the session's later runs; the publish just
+    // reports "not confirmed yet", which counts in s_pub_fail.
+    int scan_timeout = s_transport == TRANSPORT_SERIAL ? 0 : SCAN_TIMEOUT_MS;
+    if (rmw_uros_set_publisher_session_timeout(rcl_publisher_get_rmw_handle(&s_pub_scan), scan_timeout) != RMW_RET_OK)
         ESP_LOGW(TAG, "could not set the /scan publish timeout");
     CHECK(rclc_publisher_init_best_effort(&s_pub_ptz, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "ptz_angle"));
     CHECK(rclc_publisher_init_best_effort(&s_pub_battery, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), "battery"));
     CHECK(rclc_publisher_init_best_effort(&s_pub_power, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(sensor_msgs, msg, BatteryState), "power"));
     CHECK(rclc_publisher_init_best_effort(&s_pub_used, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), "power_used_wh"));
+    // Battery guard state (batt_state_t: 0 no pack, 1 OK, 2 LOW, 3 CRITICAL), with /power.
+    CHECK(rclc_publisher_init_best_effort(&s_pub_guard, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt8), "battery_guard"));
     // Best-effort subscriptions match both reliable and best-effort publishers.
     CHECK(rclc_subscription_init_best_effort(&s_sub_cmd, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "cmd_vel"));
     CHECK(rclc_subscription_init_best_effort(&s_sub_ptz, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "cmd_ptz_angle"));
     CHECK(rclc_subscription_init_best_effort(&s_sub_beep, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt16), "beep"));
-    CHECK(rclc_executor_init(&s_exec, &s_support.context, 3, &s_alloc));
+    CHECK(rclc_subscription_init_best_effort(&s_sub_sim, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), "battery_sim"));
+    CHECK(rclc_executor_init(&s_exec, &s_support.context, 4, &s_alloc));
     CHECK(rclc_executor_add_subscription(&s_exec, &s_sub_cmd, &s_cmd_in, on_cmd_vel, ON_NEW_DATA));
     CHECK(rclc_executor_add_subscription(&s_exec, &s_sub_ptz, &s_ptz_in, on_ptz, ON_NEW_DATA));
     CHECK(rclc_executor_add_subscription(&s_exec, &s_sub_beep, &s_beep_in, on_beep, ON_NEW_DATA));
+    CHECK(rclc_executor_add_subscription(&s_exec, &s_sub_sim, &s_sim_in, on_battery_sim, ON_NEW_DATA));
     if (rmw_uros_sync_session(1000) != RMW_RET_OK) ESP_LOGW(TAG, "time sync failed; stamps will be off until the next try");
     return true;
 }
@@ -370,7 +416,9 @@ static void ros_destroy(void) {
     DISCARD(rcl_subscription_fini(&s_sub_cmd, &s_node));
     DISCARD(rcl_subscription_fini(&s_sub_ptz, &s_node));
     DISCARD(rcl_subscription_fini(&s_sub_beep, &s_node));
-    rcl_publisher_t *pubs[] = {&s_pub_imu, &s_pub_battery, &s_pub_power, &s_pub_used, &s_pub_odom, &s_pub_scan, &s_pub_ptz};
+    DISCARD(rcl_subscription_fini(&s_sub_sim, &s_node));
+    rcl_publisher_t *pubs[] = {&s_pub_imu, &s_pub_battery, &s_pub_power, &s_pub_used, &s_pub_odom, &s_pub_scan, &s_pub_ptz,
+                              &s_pub_guard};
     for (size_t i = 0; i < sizeof pubs / sizeof pubs[0]; i++) DISCARD(rcl_publisher_fini(pubs[i], &s_node));
     DISCARD(rcl_node_fini(&s_node));
     DISCARD(rclc_support_fini(&s_support));
@@ -468,6 +516,8 @@ static void publish_power(void) {
     taskEXIT_CRITICAL(&s_lock);
     s_f32.data = pok ? p.bus_v : adc;
     if (rcl_publish(&s_pub_battery, &s_f32, NULL) != RCL_RET_OK) s_pub_fail++;
+    s_guard_msg.data = (uint8_t)s_batt_state;
+    if (rcl_publish(&s_pub_guard, &s_guard_msg, NULL) != RCL_RET_OK) s_pub_fail++;
     if (!pok) return;
     stamp(&s_power_msg.header.stamp);
     s_power_msg.voltage = p.bus_v;
@@ -481,12 +531,15 @@ static void publish_power(void) {
 static void ros_task(void *arg) {
     net_config_t cfg;
     net_load_config(&cfg);
+    if (!transport_setup(s_transport, &cfg)) {
+        ESP_LOGE(TAG, "no micro-ROS transport: ROS stays off");
+        vTaskDelete(NULL);
+    }
     s_alloc = rcl_get_default_allocator();
     s_init_opts = rcl_get_zero_initialized_init_options();
     ESP_ERROR_CHECK(rcl_init_options_init(&s_init_opts, s_alloc));
     ESP_ERROR_CHECK(rcl_init_options_set_domain_id(&s_init_opts, cfg.domain_id));
     rmw_init_options_t *rmw_opts = rcl_init_options_get_rmw_init_options(&s_init_opts);
-    ESP_ERROR_CHECK(rmw_uros_options_set_udp_address(cfg.agent_ip, cfg.agent_port, rmw_opts));
     msgs_init();
 
     int64_t next_ping = 0, next_power = 0, next_sync = 0;
@@ -494,12 +547,13 @@ static void ros_task(void *arg) {
     for (uint32_t tick = 0;; tick++) {
         int64_t now = esp_timer_get_time();
         if (!s_ros_up) {
-            if (net_wifi_up() && rmw_uros_ping_agent_options(200, 1, rmw_opts) == RMW_RET_OK) {
+            bool link = s_transport == TRANSPORT_SERIAL || net_wifi_up();
+            if (link && rmw_uros_ping_agent_options(200, 1, rmw_opts) == RMW_RET_OK) {
                 if (ros_create()) {
                     s_ros_up = true;
                     next_ping = now + 1000000;
                     next_sync = now + RESYNC_PERIOD_US;
-                    ESP_LOGI(TAG, "connected to agent %s:%s", cfg.agent_ip, cfg.agent_port);
+                    ESP_LOGI(TAG, "connected to the agent (%s)", transport_name(s_transport));
                     beep(80);
                     wake = xTaskGetTickCount();
                 } else {
@@ -540,6 +594,26 @@ static void ros_task(void *arg) {
     }
 }
 
+static int log_off(const char *fmt, va_list args) {
+    (void)fmt; (void)args;
+    return 0;
+}
+
+// The saved transport, unless KEY is held at power-on: then UDP for this boot (a way back to the
+// console and Wi-Fi without reflashing).
+static transport_kind_t choose_transport(void) {
+    gpio_config_t key = {.pin_bit_mask = 1ULL << PIN_KEY, .mode = GPIO_MODE_INPUT, .pull_up_en = GPIO_PULLUP_ENABLE};
+    gpio_config(&key);
+    vTaskDelay(pdMS_TO_TICKS(5));
+    transport_kind_t saved = transport_load();
+    if (gpio_get_level(PIN_KEY) == 0) {
+        ESP_LOGW(TAG, "KEY held: UDP for this boot (saved: %s)", transport_name(saved));
+        beep(80);
+        return TRANSPORT_UDP;
+    }
+    return saved;
+}
+
 void app_main(void) {
     // Motors off, buzzer quiet, LEDs off, before anything else.
     out_low(PIN_M1A); out_low(PIN_M1B); out_low(PIN_M2A); out_low(PIN_M2B);
@@ -551,6 +625,7 @@ void app_main(void) {
     esp_err_t err = nvs_flash_init();
     if (err != ESP_OK) ESP_LOGE(TAG, "nvs init failed: %s (not erasing: it holds the settings)", esp_err_to_name(err));
     net_wifi_start();
+    s_transport = choose_transport();
 
     i2c_master_bus_handle_t imu_bus, aux_bus;
     i2c_master_bus_config_t bc = {.i2c_port = I2C_NUM_0, .sda_io_num = PIN_IMU_SDA, .scl_io_num = PIN_IMU_SCL,
@@ -578,6 +653,13 @@ void app_main(void) {
     lidar_start();
     xTaskCreatePinnedToCore(sensor_task, "sensors", 4096, (void *)(intptr_t)imu, 6, NULL, 1);
     xTaskCreatePinnedToCore(status_task, "status", 4096, NULL, 2, NULL, 1);
-    console_start();
+    if (s_transport == TRANSPORT_SERIAL) {
+        // micro-ROS owns UART0 from here: any log line would land in its byte stream.
+        ESP_LOGW(TAG, "micro-ROS on the USB serial link: logs off from here");
+        vTaskDelay(pdMS_TO_TICKS(50));
+        esp_log_set_vprintf(log_off);
+    } else {
+        console_start();
+    }
     xTaskCreatePinnedToCore(ros_task, "ros", 16384, NULL, 5, NULL, 0);
 }

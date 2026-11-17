@@ -8,9 +8,12 @@ At CRITICAL the firmware has already stopped the wheels and lidar. If it stays c
 HALT_AFTER_S (a charger plugged in clears it), this halts the Pi so its SD card isn't cut mid-write
 when the pack or the backup battery runs out.
 
+With micro-ROS on the USB link (firmware "transport serial") the agent owns the port and the
+firmware's logs are off: --source ros reads /battery_guard (the guard's state, 0-3) and /power
+instead (ROS 2 environment needed: domain 77).
+
 Raw serial lines are never logged or stored: the boot log can hold network settings.
-Once micro-ROS moves to this USB link (firmware phase 3), read /power instead.
-Run as root (systemd unit: battery-watch.service). --dry-run logs instead of halting.
+Runs as the ROS user (systemd unit: battery-watch.service). --dry-run logs instead of halting.
 """
 import argparse
 import fcntl
@@ -133,12 +136,9 @@ def run(port: str, dry_run: bool) -> None:
                         log(f"battery {describe(r)}" + (f" (was {before})" if w.state != before else ""))
                         last_summary = now
                 if should_halt(w, now):
-                    log(f"battery critical for {HALT_AFTER_S:.0f} s: halting")
-                    if dry_run:
-                        w = Watch()
-                        continue
-                    subprocess.run(["systemctl", "halt"], check=False)
-                    return
+                    if halt(dry_run):
+                        return
+                    w = Watch()
         except OSError as e:
             log(f"{port} lost: {e.strerror}; reopening")
             time.sleep(2)
@@ -149,12 +149,81 @@ def run(port: str, dry_run: bool) -> None:
                 pass
 
 
+GUARD_STATES = {0: "NO PACK", 1: "OK", 2: "LOW", 3: "CRITICAL"}   # batt_state_t in the firmware
+
+
+def guard_reading(state: int, volts: float, amps: float | None) -> Reading | None:
+    name = GUARD_STATES.get(state)
+    return Reading(name, volts, amps) if name else None
+
+
+def halt(dry_run: bool) -> bool:
+    log(f"battery critical for {HALT_AFTER_S:.0f} s: halting")
+    if dry_run:
+        return False
+    # The service runs as the ROS user (DDS between root and user processes didn't connect), with a
+    # sudoers rule for exactly this command: onboard/battery-watch.sudoers.
+    cmd = ["systemctl", "halt"] if os.geteuid() == 0 else ["sudo", "-n", "/usr/bin/systemctl", "halt"]
+    subprocess.run(cmd, check=False)
+    return True
+
+
+def run_ros(dry_run: bool) -> None:
+    import rclpy                                   # only this mode needs ROS
+    from rclpy.executors import ExternalShutdownException
+    from rclpy.qos import QoSProfile, ReliabilityPolicy
+    from sensor_msgs.msg import BatteryState
+    from std_msgs.msg import UInt8
+
+    rclpy.init()
+    node = rclpy.create_node("battery_watch")
+    qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)   # the firmware's
+    state = {"watch": Watch(), "volts": 0.0, "amps": None, "summary": 0.0, "done": False}
+
+    def on_power(msg: BatteryState) -> None:
+        state["volts"], state["amps"] = msg.voltage, -msg.current     # BatteryState: negative out
+
+    def on_guard(msg: UInt8) -> None:
+        r = guard_reading(msg.data, state["volts"], state["amps"])
+        if r is None:
+            return
+        now = time.monotonic()
+        before = state["watch"].state
+        state["watch"] = step(state["watch"], r, now)
+        if state["watch"].state != before or now - state["summary"] >= SUMMARY_EVERY_S:
+            log(f"battery {describe(r)}" + (f" (was {before})" if state["watch"].state != before else ""))
+            state["summary"] = now
+
+    def check() -> None:
+        if should_halt(state["watch"], time.monotonic()):
+            state["done"] = halt(dry_run)
+            state["watch"] = Watch()
+
+    node.create_subscription(BatteryState, "/power", on_power, qos)
+    node.create_subscription(UInt8, "/battery_guard", on_guard, qos)
+    node.create_timer(1.0, check)
+    log("watching /battery_guard")
+    try:
+        while rclpy.ok() and not state["done"]:
+            rclpy.spin_once(node, timeout_sec=1.0)
+    except (KeyboardInterrupt, ExternalShutdownException):
+        log("stopped")                             # systemctl stop or Ctrl-C
+    finally:
+        node.destroy_node()
+        rclpy.try_shutdown()
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--source", choices=["serial", "ros"], default="serial",
+                    help="serial: the firmware's log on --port; ros: /battery_guard (micro-ROS on USB)")
     ap.add_argument("--port", default=PORT)
     ap.add_argument("--dry-run", action="store_true", help="log the halt instead of doing it")
     args = ap.parse_args()
-    run(args.port, args.dry_run)
+    if args.source == "ros":
+        run_ros(args.dry_run)
+    else:
+        run(args.port, args.dry_run)
     return 0
 
 

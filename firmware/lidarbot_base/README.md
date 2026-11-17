@@ -13,7 +13,7 @@ the calibration we measured with Yahboom's firmware (docs/07).
 |---|---|---|
 | 1 | Sensors: IMU, battery current (INA228), OLED status | **done** (2026-11-16) |
 | 2 | Driving: motors with PID speed control from the encoders, `/cmd_vel`, `/odom_raw`, lidar `/scan`, pan/tilt, buzzer | **running on the stand** (2026-11-16); floor calibration and Nav2 next |
-| 3 | micro-ROS over USB serial to the Orange Pi on the robot, instead of Wi-Fi | later |
+| 3 | micro-ROS over USB serial to the Orange Pi on the robot, instead of Wi-Fi | **running** (2026-11-17): full topic rates over the cable; floor test next |
 
 ## Phase 1
 
@@ -73,6 +73,38 @@ Checked on the stand (2026-11-16, wheels in the air):
 
 Odometry on the floor and Nav2 are not checked yet: Yahboom's firmware stays the reference for
 driving until they match docs/07.
+
+## micro-ROS link: UDP or the USB cable
+
+`main/transport.c` is a micro-ROS custom transport with two backends, chosen at boot from nvs
+(`LIDARBOT` / `transport`):
+
+- **udp** (default): Wi-Fi to the agent address in Yahboom's settings, the same packets as
+  micro-ROS's own UDP transport.
+- **serial**: UART0, the board's CP2102 on the USB-C port, at 921600 baud, to the agent on the
+  Orange Pi (`micro_ros_agent serial --dev /dev/ttyUSB0 -b 921600`). Logs are off from the
+  moment it starts (they would land in micro-ROS's byte stream); the OLED still shows the state.
+
+Console commands (115200 baud, UDP mode only, since serial mode owns the console):
+
+| Command | Effect |
+|---|---|
+| `transport serial` / `transport udp` | saved, then the board restarts |
+| `agent 192.168.1.140 8090` | UDP agent address, saved for the next restart |
+| `batt sim 10.4` / `batt sim off` | battery guard test mode (also the `/battery_sim` topic) |
+
+**Back to UDP without reflashing:** hold KEY while switching on. That boot uses UDP with logs and
+the console, and `transport udp` makes it stick. Flashing works in either mode (the ROM bootloader
+takes the port).
+
+Measured over the cable (2026-11-17, Pi agent): `/imu` 49.6 Hz, `/odom_raw` 25.0 Hz, `/scan`
+6.1 Hz, `/power` and `/battery_guard` about 4.6 Hz. At first `/imu` ran at 42 Hz: each reliable
+`/scan` publish waited up to 200 ms for the agent's acknowledgement, which takes tens of
+milliseconds over serial (a scan alone is 30 ms on the wire). In serial mode it no longer waits;
+the scan stays queued and is resent until acknowledged.
+
+New topics for serial mode: `/battery_guard` (std_msgs/UInt8, the guard's state: 0 no pack,
+1 OK, 2 LOW, 3 CRITICAL) and `/battery_sim` (std_msgs/Float32: test volts, 0 ends it).
 
 ## Build and flash
 

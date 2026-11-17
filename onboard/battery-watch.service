@@ -1,12 +1,21 @@
 # Halts the Pi when the rover's battery guard stays CRITICAL (see battery_watch.py).
 # Install: sudo install -m 755 battery_watch.py /usr/local/bin/ && sudo install -m 644 battery-watch.service /etc/systemd/system/
+#          sudo install -m 440 battery-watch.sudoers /etc/sudoers.d/battery-watch && sudo visudo -c
 #          sudo systemctl enable --now battery-watch
+# Source: the firmware's serial log (default), or ROS once micro-ROS runs over the USB cable:
+#          echo BATTERY_WATCH_SOURCE=ros | sudo tee /etc/default/battery-watch && sudo systemctl restart battery-watch
 [Unit]
 Description=Rover battery watch (halt at critical)
 After=multi-user.target
 
 [Service]
-ExecStart=/usr/bin/python3 -u /usr/local/bin/battery_watch.py
+Environment=ROS_DOMAIN_ID=77 ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST BATTERY_WATCH_SOURCE=serial
+# As the ROS user: run as root it never received the rover's topics (DDS between root and the
+# user's processes didn't connect). Halting goes through one sudoers rule: battery-watch.sudoers.
+User=orangepi
+Environment=HOME=/home/orangepi
+EnvironmentFile=-/etc/default/battery-watch
+ExecStart=/bin/bash -c 'source /opt/ros/jazzy/setup.bash && exec /usr/bin/python3 -u /usr/local/bin/battery_watch.py --source "$BATTERY_WATCH_SOURCE"'
 Restart=always
 RestartSec=5
 

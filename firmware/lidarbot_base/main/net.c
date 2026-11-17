@@ -35,6 +35,17 @@ void net_load_config(net_config_t *cfg) {
     ESP_LOGI(TAG, "agent %s:%s, domain %d", cfg->agent_ip, cfg->agent_port, cfg->domain_id);
 }
 
+esp_err_t net_save_agent(const uint8_t ip[4], uint16_t port) {
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(NS, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+    err = nvs_set_blob(h, "CFG_AGENT_IP", ip, 4);
+    if (err == ESP_OK) err = nvs_set_u16(h, "CFG_AGENT_PORT", port);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
 static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data) {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();

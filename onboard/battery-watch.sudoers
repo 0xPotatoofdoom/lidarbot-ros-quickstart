@@ -1,0 +1,2 @@
+# Lets battery-watch.service (running as orangepi) halt the Pi, and nothing else.
+orangepi ALL=(root) NOPASSWD: /usr/bin/systemctl halt

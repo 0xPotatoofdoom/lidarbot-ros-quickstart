@@ -1,5 +1,5 @@
 """Tests for battery_watch.py: python -m pytest onboard/test_battery_watch.py"""
-from battery_watch import HALT_AFTER_S, STALE_S, Reading, Watch, parse, should_halt, step
+from battery_watch import HALT_AFTER_S, STALE_S, Reading, Watch, guard_reading, parse, should_halt, step
 
 STATUS = "I (123) main: {top} | {bottom} | wifi -60 dBm | ros up, 0 failed publishes | wheels 0.00 0.00 m/s"
 
@@ -58,3 +58,10 @@ def test_silence_does_not_halt():
 def test_no_pack_never_halts():
     w, t = run([("NO PACK", 10)] * 20)
     assert not should_halt(w, t)
+
+
+def test_guard_states_from_ros():
+    assert guard_reading(3, 10.0, 0.2) == Reading("CRITICAL", 10.0, 0.2)
+    assert guard_reading(1, 12.1, None).state == "OK"
+    assert guard_reading(0, 0.0, None).state == "NO PACK"
+    assert guard_reading(9, 12.0, None) is None

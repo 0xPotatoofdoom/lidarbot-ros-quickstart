@@ -199,8 +199,14 @@ sudo systemctl start battery-watch
 It takes about 95 s (no stub) and keeps the bootloader, partition table and saved settings.
 - **After a halt, the Pi stays off until its power is removed.** The backup battery keeps it
   powered, so recharging the rover doesn't restart it: switch off the backup board or unplug the Pi.
-- When micro-ROS moves to this USB link (firmware phase 3), the serial log is no longer free to
-  read; the watch should switch to the `/power` topic then.
+- With micro-ROS on this USB link (firmware `transport serial`) the serial log isn't free to read:
+  `BATTERY_WATCH_SOURCE=ros` in `/etc/default/battery-watch` makes the watch read `/battery_guard`
+  and `/power` instead. It runs as `orangepi`, not root: as root it never received the rover's
+  topics (DDS between root and the user's processes didn't connect, with or without Fast DDS
+  shared memory). Halting goes through one sudoers rule, `onboard/battery-watch.sudoers`
+  (`systemctl halt` only), installed with `visudo -c`.
+- Checked over ROS 2026-11-17 (dry run): `/battery_sim` 10.4 -> LOW, 10.0 -> CRITICAL, "halting"
+  after 60 s, `/battery_sim` 0 -> OK.
 
 ## The rover's ROS stack on the Pi
 
@@ -232,10 +238,12 @@ onboard/rover-up.sh agent_transport:=tcp4 agent_port:=8888 nav:=true   # behind 
 onboard/rover-up.sh nav:=true                                          # rover sends UDP 8090 straight to the Pi
 ```
 
-Until the firmware can be pointed at the Pi (or talks over the USB cable), the Mac's relay
-forwards the rover to the Pi's agent:
-`.venv/bin/python tools/udp_tcp_bridge.py --agent-host 192.168.1.140` (plain `./up` points it
-back at the container).
+The rover talks to the Pi over the USB cable (firmware `transport serial`, see
+`firmware/lidarbot_base/README.md`): `onboard/rover-up.sh agent_transport:=serial nav:=true`.
+Over Wi-Fi instead, either `agent <pi-ip> 8090` on the firmware console with the default
+`agent_transport:=udp4`, or the Mac's relay pointed at the Pi:
+`.venv/bin/python tools/udp_tcp_bridge.py --agent-host 192.168.1.140` with `agent_transport:=tcp4
+agent_port:=8888` (plain `./up` points the relay back at the container).
 
 ### Does it fit? (2026-11-17)
 
