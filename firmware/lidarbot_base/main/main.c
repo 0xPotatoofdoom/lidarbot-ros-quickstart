@@ -15,6 +15,7 @@
 // OLED: volts and amps on top, connection state below. LEDs: blue blinks while looking for the
 // agent, green while connected. One beep when the agent connects. Keep the robot still for the
 // first 2 s after power-on (gyro bias).
+// Serial console (115200): "batt sim <volts>" / "batt sim off" tests the low-battery guard.
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -23,6 +24,7 @@
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/ledc.h"
+#include "driver/uart.h"
 #include "esp_adc/adc_cali.h"
 #include "esp_adc/adc_cali_scheme.h"
 #include "esp_adc/adc_oneshot.h"
@@ -154,6 +156,58 @@ static void battery_check(batt_guard_t *g, double volts, double amps, bool *load
     }
 }
 
+// ---------- battery test mode: "batt sim <volts>" / "batt sim off" on the serial console ----------
+static portMUX_TYPE s_sim_lock = portMUX_INITIALIZER_UNLOCKED;
+static double s_sim_v;
+static int64_t s_sim_until_us;   // 0: off
+
+static bool sim_volts(double *v) {
+    bool on;
+    taskENTER_CRITICAL(&s_sim_lock);
+    on = s_sim_until_us != 0 && esp_timer_get_time() < s_sim_until_us;
+    if (on) *v = s_sim_v;
+    taskEXIT_CRITICAL(&s_sim_lock);
+    return on;
+}
+
+static void sim_set(bool on, double v) {
+    taskENTER_CRITICAL(&s_sim_lock);
+    s_sim_v = v;
+    s_sim_until_us = on ? esp_timer_get_time() + (int64_t)BATT_SIM_MAX_S * 1000000 : 0;
+    taskEXIT_CRITICAL(&s_sim_lock);
+    if (on) ESP_LOGW(TAG, "battery test mode: %.2f V for up to %d s", v, BATT_SIM_MAX_S);
+    else ESP_LOGW(TAG, "battery test mode off");
+}
+
+static void console_task(void *arg) {
+    char line[48];
+    size_t n = 0;
+    for (;;) {
+        uint8_t c;
+        if (uart_read_bytes(UART_NUM_0, &c, 1, portMAX_DELAY) != 1) continue;
+        if (c != '\n' && c != '\r') {
+            if (n < sizeof line - 1) line[n++] = (char)c;
+            else n = sizeof line;               // too long: drop the whole line
+            continue;
+        }
+        if (n > 0 && n < sizeof line) {
+            line[n] = 0;
+            double v;
+            batt_cmd_t cmd = batt_parse_cmd(line, &v);
+            if (cmd == BATT_CMD_SIM) sim_set(true, v);
+            else if (cmd == BATT_CMD_SIM_OFF) sim_set(false, 0);
+        }
+        n = 0;
+    }
+}
+
+static void console_start(void) {
+    // RX only: logging keeps writing to UART0 directly. A failure just means no test mode.
+    esp_err_t err = uart_driver_install(UART_NUM_0, 256, 0, 0, NULL, 0);
+    if (err != ESP_OK) { ESP_LOGW(TAG, "console input off: %s", esp_err_to_name(err)); return; }
+    xTaskCreatePinnedToCore(console_task, "console", 3072, NULL, 1, NULL, 1);
+}
+
 static void sensor_task(void *arg) {
     bool imu = (bool)(intptr_t)arg;
     TickType_t last = xTaskGetTickCount();
@@ -182,7 +236,9 @@ static void sensor_task(void *arg) {
             s_power_ok = ok;
             s_adc_v = adc;
             taskEXIT_CRITICAL(&s_lock);
-            battery_check(&batt, ok ? p.bus_v : adc, ok ? p.current_a : 0.0, &loads_stopped);
+            double sim;
+            if (sim_volts(&sim)) battery_check(&batt, sim, 0.0, &loads_stopped);
+            else battery_check(&batt, ok ? p.bus_v : adc, ok ? p.current_a : 0.0, &loads_stopped);
         }
         vTaskDelayUntil(&last, pdMS_TO_TICKS(1000 / IMU_HZ));
     }
@@ -201,7 +257,9 @@ static void status_task(void *arg) {
         taskENTER_CRITICAL(&s_lock);
         p = s_power; pok = s_power_ok; adc = s_adc_v;
         taskEXIT_CRITICAL(&s_lock);
-        if (pok) snprintf(top, sizeof top, "%.2fV %.2fA", p.bus_v, p.current_a);
+        double sim;
+        if (sim_volts(&sim)) snprintf(top, sizeof top, "SIM %.2fV", sim);
+        else if (pok) snprintf(top, sizeof top, "%.2fV %.2fA", p.bus_v, p.current_a);
         else snprintf(top, sizeof top, "%.2fV", adc);
         if (s_batt_state == BATT_CRITICAL) snprintf(bottom, sizeof bottom, "BATT CRITICAL");
         else if (s_batt_state == BATT_LOW) snprintf(bottom, sizeof bottom, "BATT LOW");
@@ -520,5 +578,6 @@ void app_main(void) {
     lidar_start();
     xTaskCreatePinnedToCore(sensor_task, "sensors", 4096, (void *)(intptr_t)imu, 6, NULL, 1);
     xTaskCreatePinnedToCore(status_task, "status", 4096, NULL, 2, NULL, 1);
+    console_start();
     xTaskCreatePinnedToCore(ros_task, "ros", 16384, NULL, 5, NULL, 0);
 }

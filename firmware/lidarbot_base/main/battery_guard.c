@@ -1,4 +1,6 @@
 #include "battery_guard.h"
+#include <stdlib.h>
+#include <string.h>
 
 #define LOW_PERIOD_TICKS 150       // 30 s
 #define CRITICAL_PERIOD_TICKS 50   // 10 s
@@ -69,4 +71,19 @@ const char *batt_state_name(batt_state_t s) {
     case BATT_CRITICAL: return "CRITICAL";
     }
     return "?";
+}
+
+batt_cmd_t batt_parse_cmd(const char *line, double *volts) {
+    static const char prefix[] = "batt sim ";
+    while (*line == ' ') line++;
+    if (strncmp(line, prefix, sizeof prefix - 1) != 0) return BATT_CMD_NONE;
+    const char *arg = line + sizeof prefix - 1;
+    while (*arg == ' ') arg++;
+    size_t n = strcspn(arg, " \r\n");
+    if (n == 3 && strncmp(arg, "off", 3) == 0) return BATT_CMD_SIM_OFF;
+    char *end;
+    double v = strtod(arg, &end);
+    if (end == arg || end != arg + n || !(v > BATT_SIM_MIN_V && v < BATT_SIM_MAX_V)) return BATT_CMD_NONE;
+    *volts = v;
+    return BATT_CMD_SIM;
 }

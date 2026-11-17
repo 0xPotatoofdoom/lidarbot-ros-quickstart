@@ -62,6 +62,22 @@ int main(void) {
     batt_guard_update(&g, 0.0, 0.0);
     assert(g.state == BATT_NO_PACK && !g.stop_loads);
 
+    // Test-mode commands from the serial console.
+    double v = 0;
+    assert(batt_parse_cmd("batt sim 10.4", &v) == BATT_CMD_SIM && v == 10.4);
+    assert(batt_parse_cmd("  batt sim 9.9\r\n", &v) == BATT_CMD_SIM && v == 9.9);
+    assert(batt_parse_cmd("batt sim off", &v) == BATT_CMD_SIM_OFF);
+    assert(batt_parse_cmd("batt sim off\r", &v) == BATT_CMD_SIM_OFF);
+    v = -1;
+    assert(batt_parse_cmd("batt sim", &v) == BATT_CMD_NONE);
+    assert(batt_parse_cmd("batt sim 10.4x", &v) == BATT_CMD_NONE);
+    assert(batt_parse_cmd("batt sim -3", &v) == BATT_CMD_NONE);
+    assert(batt_parse_cmd("batt sim 99", &v) == BATT_CMD_NONE);
+    assert(batt_parse_cmd("batt sim nan", &v) == BATT_CMD_NONE);
+    assert(batt_parse_cmd("hello", &v) == BATT_CMD_NONE);
+    assert(batt_parse_cmd("", &v) == BATT_CMD_NONE);
+    assert(v == -1);
+
     puts("battery_guard: all checks passed");
     return 0;
 }

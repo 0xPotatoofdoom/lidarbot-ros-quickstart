@@ -163,6 +163,40 @@ journalctl -u battery-watch -f          # state changes, plus a summary every 5 
 - Opening the port doesn't reset the ESP32: the board's scan counter kept counting across opens.
 - Raw serial lines are never logged: the boot log can include network settings.
 - `--dry-run` logs the halt instead of doing it.
+
+### Testing it with the firmware's battery test mode
+
+The firmware takes `batt sim <volts>` on its serial console: the battery guard uses that resting
+voltage instead of the INA228 (the OLED shows `SIM 10.40V`; `/power` keeps the real readings).
+`batt sim off` ends it, and it ends by itself after 10 minutes. Keep the port open while sending
+(the watcher does), and clear `hupcl` once so closing it can't reset the board:
+
+```bash
+sudo systemctl stop battery-watch
+sudo stty -F /dev/ttyUSB0 -hupcl
+sudo python3 -u /usr/local/bin/battery_watch.py --dry-run &
+printf 'batt sim 10.4\n' | sudo tee /dev/ttyUSB0    # LOW after ~10 s: double beeps
+printf 'batt sim 10.0\n' | sudo tee /dev/ttyUSB0    # CRITICAL: long beeps, wheels and lidar stop
+# ~60 s later the watcher logs "halting" (dry run: it doesn't)
+printf 'batt sim off\n' | sudo tee /dev/ttyUSB0
+kill %1; sudo systemctl start battery-watch
+```
+
+Checked 2026-11-17: OK, LOW, CRITICAL, "halting" after 60 s, then back to OK after `batt sim off`.
+
+### Flashing the rover board from the Pi
+
+With the rover's USB on the Pi, flash from it instead of the Mac. Build on the Mac
+(`firmware/lidarbot_base/build_and_flash.sh build`), copy `build/lidarbot_base.bin` over, then:
+
+```bash
+sudo apt install esptool     # 4.7; Ubuntu's package has no flasher stubs, hence --no-stub
+sudo systemctl stop battery-watch
+esptool --chip esp32s3 --port /dev/ttyUSB0 --baud 115200 --no-stub write_flash 0x10000 lidarbot_base.bin
+sudo systemctl start battery-watch
+```
+
+It takes about 95 s (no stub) and keeps the bootloader, partition table and saved settings.
 - **After a halt, the Pi stays off until its power is removed.** The backup battery keeps it
   powered, so recharging the rover doesn't restart it: switch off the backup board or unplug the Pi.
 - When micro-ROS moves to this USB link (firmware phase 3), the serial log is no longer free to

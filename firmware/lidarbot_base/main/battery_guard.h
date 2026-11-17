@@ -30,3 +30,12 @@ void batt_guard_init(batt_guard_t *g);
 // One reading (bus volts, amps out of the pack). Updates state and this tick's actions.
 void batt_guard_update(batt_guard_t *g, double bus_v, double current_a);
 const char *batt_state_name(batt_state_t s);
+
+// Test mode, typed on the serial console: "batt sim 10.4" feeds the guard 10.4 V resting (0 A)
+// instead of the INA228, "batt sim off" ends it. The firmware ends it after BATT_SIM_MAX_S anyway.
+typedef enum { BATT_CMD_NONE, BATT_CMD_SIM, BATT_CMD_SIM_OFF } batt_cmd_t;
+#define BATT_SIM_MAX_S 600
+#define BATT_SIM_MIN_V 0.0
+#define BATT_SIM_MAX_V 15.0
+// Parses one console line; on BATT_CMD_SIM sets *volts. Anything else is BATT_CMD_NONE.
+batt_cmd_t batt_parse_cmd(const char *line, double *volts);
