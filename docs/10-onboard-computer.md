@@ -272,3 +272,29 @@ floor obstacle detector.
 - Start the agent binary as a launch `Node`, not `ros2 run`: `ros2 run` didn't pass SIGINT on, the
   orphaned agent kept port 8888, and the next start failed with "bind error".
 - The EKF misses its 20 Hz rate for a few cycles while everything starts; it settles at about 19-20 Hz.
+
+## Power: the Pi runs from the pack
+
+The Pi takes 5 V on header pins 4 (5 V) and 6 (GND) from a 3 A buck converter, fed from the rover
+board's charge jack. That jack is live with the main switch off and sits after INA228 #1, so the
+Pi's power is in every `/power` reading: loading all four Pi cores raised the pack current from
+0.49 to 0.56 A (about 0.8 W) and it fell back after. Nothing may be plugged into that jack as a
+charger now; charge through the pack's own pigtail. (A power-bank board between the rover's USB-A
+and the Pi cut out under load: the Pi crashed twice and two flashes failed. Don't use one.)
+
+With the switch off, the Pi's USB port powers the rover board back through the cable: the ESP32,
+lidar and guard kept running and the wheels and servos still moved (at about half speed). So the
+firmware reads the switched rail (GPIO3, `/rail_voltage`: 11.3 V on, 4.9 V off) and below 6 V for
+1 s stops the motors, lidar and servos (OLED: SWITCH OFF). Checked on the stand: 0.15 m/s commanded
+gave 0.000 at the encoders with the switch off, 0.164 with it on.
+
+The battery watch halts the Pi when:
+
+| Condition | After |
+|---|---|
+| `/battery_guard` CRITICAL | 60 s |
+| `/rail_voltage` under 6 V (main switch off) | 30 s |
+| no `/battery_guard` at all while `rover-stack` runs (a cable with its 5 V blocked: the board really powers down) | 30 s |
+
+A halted Pi stays on the converter until its power is cut: unplug the pigtail or add an inline
+switch, or the halted Pi and the converter keep drawing from the pack with nothing watching.

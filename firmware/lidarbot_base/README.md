@@ -103,6 +103,10 @@ Measured over the cable (2026-11-17, Pi agent): `/imu` 49.6 Hz, `/odom_raw` 25.0
 milliseconds over serial (a scan alone is 30 ms on the wire). In serial mode it no longer waits;
 the scan stays queued and is resent until acknowledged.
 
+Main switch: `/rail_voltage` (std_msgs/Float32) is the board's own battery sense on GPIO3, which
+reads the switched rail. Below 6 V for 1 s the motors, lidar and servos stop (the board can stay
+alive through USB with the switch off, see docs/10-onboard-computer.md), above 8 V they run again.
+
 New topics for serial mode: `/battery_guard` (std_msgs/UInt8, the guard's state: 0 no pack,
 1 OK, 2 LOW, 3 CRITICAL) and `/battery_sim` (std_msgs/Float32: test volts, 0 ends it).
 
