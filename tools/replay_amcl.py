@@ -33,7 +33,9 @@ from pathlib import Path
 
 SAMPLE_PERIOD_S = 1.0
 SETTLE_S = 10.0              # skip the first seconds while AMCL converges
-MAP_YAML = "/root/map/home.yaml"
+# Container paths by default; set these to run natively (e.g. on the Orange Pi).
+MAP_YAML = os.environ.get("LIDARBOT_MAP", "/root/map/home.yaml")
+CONFIG_DIR = os.environ.get("LIDARBOT_CONFIG", "/work/config")
 
 
 @dataclass(frozen=True)
@@ -164,9 +166,11 @@ def main() -> int:
     ap.add_argument("--rate", type=float, default=2.0)
     ap.add_argument("--params", help="Nav2 params file (default: config/nav2_$ROS_DISTRO.yaml or nav2.yaml)")
     ap.add_argument("--nav", action="store_true", help="full Nav2 bringup, not just localization")
+    ap.add_argument("--separate", action="store_true",
+                    help="one process per Nav2 node (use_composition:=False), to see each node's CPU")
     args = ap.parse_args()
     distro = os.environ.get("ROS_DISTRO", "humble")
-    params = args.params or next(p for p in (f"/work/config/nav2_{distro}.yaml", "/work/config/nav2.yaml")
+    params = args.params or next(p for p in (f"{CONFIG_DIR}/nav2_{distro}.yaml", f"{CONFIG_DIR}/nav2.yaml")
                                  if Path(p).exists())
     bag = Path(args.bag)
     bag = bag / "bag" if (bag / "bag").is_dir() else bag
@@ -179,6 +183,8 @@ def main() -> int:
     launch_log = Path("/tmp/replay_nav2.log" if args.nav else "/tmp/replay_localization.log")
     nav2 = ["ros2", "launch", "nav2_bringup", launch_file, f"map:={MAP_YAML}",
             f"params_file:={params}", "use_sim_time:=True", "autostart:=True"]
+    if args.separate:
+        nav2.append("use_composition:=False")
     play = ["ros2", "bag", "play", str(bag), "--clock", "--rate", str(args.rate),
             "--topics", "/scan", "/tf", "/tf_static", "/odom", "--remap", "/tf:=/tf_bag"]
     # Localization only: start AMCL first so it sees the first scans. Full Nav2: start the bag
