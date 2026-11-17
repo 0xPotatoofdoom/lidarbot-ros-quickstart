@@ -140,3 +140,30 @@ python3 onboard/ir_decode.py ir_raw.txt
 
 The Roomba Home Base's beacons use their own codes, so they'll get their own decoder there.
 The receiver is directional: aim at its dome from under a metre while testing.
+
+## Battery watch: halt at critical
+
+The Pi connects to the rover board over USB (the board's CP2102 appears as `/dev/ttyUSB0`).
+The firmware's battery guard stops the wheels and lidar at CRITICAL (under 10.2 V resting, see
+`firmware/lidarbot_base/main/battery_guard.h`). `onboard/battery_watch.py` reads the board's status
+line (every 10 s) from the serial log and halts the Pi if CRITICAL lasts 60 s, so the SD card
+isn't cut mid-write when the pack or the Pi's backup battery runs out. A charger that brings the
+pack back above the threshold cancels it. Silence on the port never triggers a halt.
+
+```bash
+scp onboard/battery_watch.py onboard/battery-watch.service orangepi@roverbot.local:~/
+ssh orangepi@roverbot.local
+sudo install -m 755 battery_watch.py /usr/local/bin/
+sudo install -m 644 battery-watch.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now battery-watch
+journalctl -u battery-watch -f          # state changes, plus a summary every 5 minutes
+```
+
+- Standard library only (termios), so nothing to install. Tests: `python -m pytest onboard/test_battery_watch.py`.
+- Opening the port doesn't reset the ESP32: the board's scan counter kept counting across opens.
+- Raw serial lines are never logged: the boot log can include network settings.
+- `--dry-run` logs the halt instead of doing it.
+- **After a halt, the Pi stays off until its power is removed.** The backup battery keeps it
+  powered, so recharging the rover doesn't restart it: switch off the backup board or unplug the Pi.
+- When micro-ROS moves to this USB link (firmware phase 3), the serial log is no longer free to
+  read; the watch should switch to the `/power` topic then.

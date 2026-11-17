@@ -1,0 +1,14 @@
+# Halts the Pi when the rover's battery guard stays CRITICAL (see battery_watch.py).
+# Install: sudo install -m 755 battery_watch.py /usr/local/bin/ && sudo install -m 644 battery-watch.service /etc/systemd/system/
+#          sudo systemctl enable --now battery-watch
+[Unit]
+Description=Rover battery watch (halt at critical)
+After=multi-user.target
+
+[Service]
+ExecStart=/usr/bin/python3 -u /usr/local/bin/battery_watch.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
