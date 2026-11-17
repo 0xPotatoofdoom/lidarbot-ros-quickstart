@@ -15,6 +15,7 @@ curve until we fit our own from a full discharge).
 """
 from __future__ import annotations
 
+import os
 import statistics
 import sys
 import time
@@ -33,8 +34,9 @@ from std_msgs.msg import Float32
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from power_meter import PowerMeter, fmt  # noqa: E402
 
-CONFIG = Path("/work/config/battery.yaml")
-LOG_DIR = Path("/root/datasets/battery")
+# Container paths by default; LIDARBOT_CONFIG / LIDARBOT_DATA override them (e.g. on the Orange Pi).
+CONFIG = Path(os.environ.get("LIDARBOT_CONFIG", "/work/config")) / "battery.yaml"
+LOG_DIR = Path(os.environ.get("LIDARBOT_DATA", "/root/datasets")) / "battery"
 WINDOW_S = 5.0          # smoothing window
 REST_AFTER = 20.0       # s without drive commands before the voltage counts as resting
 LOG_PERIOD = 1.0        # s between log rows

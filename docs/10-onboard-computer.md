@@ -201,3 +201,62 @@ It takes about 95 s (no stub) and keeps the bootloader, partition table and save
   powered, so recharging the rover doesn't restart it: switch off the backup board or unplug the Pi.
 - When micro-ROS moves to this USB link (firmware phase 3), the serial log is no longer free to
   read; the watch should switch to the `/power` topic then.
+
+## The rover's ROS stack on the Pi
+
+The Pi runs the stack natively (ROS 2 Jazzy, no Docker): micro-ROS agent, robot model,
+odometry calibrator, EKF, battery monitor, Foxglove bridge, and a lean Nav2. The Mac only needs
+the Foxglove app, connected to `ws://roverbot.local:8765`.
+
+| File | What it does |
+|---|---|
+| `onboard/rover-up.sh` | sources ROS and the agent workspace, domain 77, DDS kept on the Pi, then launches |
+| `onboard/launch/rover_pi.launch.py` | agent, `robot_state_publisher`, `ptz_joint_states.py`, calibrator, EKF, battery monitor, Foxglove; `nav:=true` adds Nav2 |
+| `onboard/launch/nav_pi.launch.py` | Nav2 in one process: map server, AMCL, planner, controller, behaviours, BT navigator, velocity smoother, collision monitor |
+| `onboard/ptz_joint_states.py` | `/ptz_angle` to `/joint_states` (pan/tilt), replacing Yahboom's `base_driver` and `joint_state_publisher` |
+
+The robot model comes from Yahboom's `robot_description` (Business Source License, so it isn't
+in this repo). Generate it in the Mac container and copy it to the Pi:
+
+```bash
+docker exec lidarbot bash -lc 'source /root/microros_ws/install/setup.bash; xacro $(ros2 pkg prefix robot_description)/share/robot_description/urdf/microros_v2.urdf.xacro camera_type:=$CAR_TYPE' > robot.urdf
+scp robot.urdf orangepi@roverbot.local:lidarbot/private/robot.urdf
+```
+
+Copy `onboard/`, `config/`, `maps/` and the tools the launch file uses (`odom_calibrator.py`,
+`battery_monitor.py`, `power_meter.py`) to `~/lidarbot` on the Pi, install
+`ros-jazzy-foxglove-bridge`, then:
+
+```bash
+onboard/rover-up.sh agent_transport:=tcp4 agent_port:=8888 nav:=true   # behind the Mac's relay
+onboard/rover-up.sh nav:=true                                          # rover sends UDP 8090 straight to the Pi
+```
+
+Until the firmware can be pointed at the Pi (or talks over the USB cable), the Mac's relay
+forwards the rover to the Pi's agent:
+`.venv/bin/python tools/udp_tcp_bridge.py --agent-host 192.168.1.140` (plain `./up` points it
+back at the container).
+
+### Does it fit? (2026-11-17)
+
+Replaying the 7-minute Nav2 loop of 2026-11-12 at real time (`tools/replay_amcl.py`, run natively
+with `LIDARBOT_MAP` / `LIDARBOT_CONFIG`), compared with the pose AMCL produced live on the robot:
+
+| Run on the Pi | Position diff, median / 95% / max | Nav2 CPU (of 400%) |
+|---|---|---|
+| Localization only | 1.1 / 2.7 / 3.7 cm | AMCL 12% |
+| Jazzy `bringup_launch.py` | 1.2 / 2.9 / 4.0 cm | 191% |
+| `nav_pi.launch.py` | 1.1 / 2.6 / 3.3 cm | 99% |
+
+Jazzy's bringup also starts the smoother, route, waypoint and docking servers, which our
+behaviour trees don't use; one process per node (`use_composition:=False`) saturated the CPU.
+
+Live, with the rover's data arriving and the robot standing still: Nav2 76%, calibrator 28%
+(Python, 75 messages a second), EKF 10-12%, agent 5%, battery monitor 4-5%; about a third of the
+CPU in total, 54 C. Memory is the tighter limit on this 1 GB board: about 340 MB available and
+60-100 MB in swap; each Python node costs about 70 MB. Not running yet: the camera driver and the
+floor obstacle detector.
+
+- Start the agent binary as a launch `Node`, not `ros2 run`: `ros2 run` didn't pass SIGINT on, the
+  orphaned agent kept port 8888, and the next start failed with "bind error".
+- The EKF misses its 20 Hz rate for a few cycles while everything starts; it settles at about 19-20 Hz.
