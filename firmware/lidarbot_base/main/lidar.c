@@ -25,6 +25,8 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static lidar_scan_t s_building, s_ready;
 static uint32_t s_good, s_bad;
 static float s_hz;
+static volatile bool s_started, s_motor_off;
+static const uint8_t CMD_STOP[] = {0xA5, 0x65}, CMD_START[] = {0xA5, 0x60};
 
 static void put_point(float lidar_deg, float range_m) {
     float deg = MOUNT_OFFSET_DEG + LIDAR_DIRECTION * lidar_deg;
@@ -102,13 +104,18 @@ void lidar_start(void) {
     ESP_ERROR_CHECK(uart_driver_install(UART, 8192, 0, 0, NULL, 0));
     ESP_ERROR_CHECK(uart_param_config(UART, &c));
     ESP_ERROR_CHECK(uart_set_pin(UART, PIN_LIDAR_TX, PIN_LIDAR_RX, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
-    const uint8_t stop[] = {0xA5, 0x65}, start[] = {0xA5, 0x60};
-    uart_write_bytes(UART, stop, 2);
+    uart_write_bytes(UART, CMD_STOP, 2);
     vTaskDelay(pdMS_TO_TICKS(50));
     uart_flush_input(UART);
-    uart_write_bytes(UART, start, 2);
+    if (!s_motor_off) uart_write_bytes(UART, CMD_START, 2);   // stays off if the battery is critical
+    s_started = true;
     xTaskCreatePinnedToCore(lidar_task, "lidar", 4096, NULL, 7, NULL, 1);
     ESP_LOGI(TAG, "started");
+}
+
+void lidar_motor(bool on) {
+    s_motor_off = !on;
+    if (s_started) uart_write_bytes(UART, on ? CMD_START : CMD_STOP, 2);
 }
 
 bool lidar_take(lidar_scan_t *out, uint32_t *seq) {

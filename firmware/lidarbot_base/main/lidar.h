@@ -15,5 +15,7 @@ typedef struct {
 } lidar_scan_t;
 
 void lidar_start(void);
+// Spin the lidar motor up or down (stop/start commands). Safe to call before lidar_start().
+void lidar_motor(bool on);
 // Copies the latest complete scan if it is newer than *seq; returns false otherwise.
 bool lidar_take(lidar_scan_t *out, uint32_t *seq);

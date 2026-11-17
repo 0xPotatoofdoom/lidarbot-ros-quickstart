@@ -20,3 +20,5 @@ void drive_start(void);
 // Velocity command from /cmd_vel (m/s, rad/s). Clamped so neither wheel exceeds MAX_WHEEL_SPEED.
 void drive_command(double v, double w);
 drive_state_t drive_state(void);
+// Low battery: while on, every target is zero (the wheels brake), whatever /cmd_vel says.
+void drive_inhibit(bool on);

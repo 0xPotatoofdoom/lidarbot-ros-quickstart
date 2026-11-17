@@ -50,6 +50,7 @@ static portMUX_TYPE s_lock = portMUX_INITIALIZER_UNLOCKED;
 static double s_cmd_v, s_cmd_w;
 static int64_t s_cmd_time;
 static drive_state_t s_state;
+static volatile bool s_inhibit;
 
 static void pwm_set(int ch, double frac) {
     ledc_set_duty(LEDC_LOW_SPEED_MODE, ch, (uint32_t)(fmin(fmax(frac, 0.0), 1.0) * PWM_MAX));
@@ -123,7 +124,7 @@ static void control_task(void *arg) {
         int64_t now = esp_timer_get_time();
         double v, w;
         taskENTER_CRITICAL(&s_lock);
-        bool fresh = (now - s_cmd_time) < CMD_TIMEOUT_MS * 1000LL;
+        bool fresh = !s_inhibit && (now - s_cmd_time) < CMD_TIMEOUT_MS * 1000LL;
         v = fresh ? s_cmd_v : 0;
         w = fresh ? s_cmd_w : 0;
         taskEXIT_CRITICAL(&s_lock);
@@ -180,6 +181,8 @@ void drive_command(double v, double w) {
     s_cmd_time = esp_timer_get_time();
     taskEXIT_CRITICAL(&s_lock);
 }
+
+void drive_inhibit(bool on) { s_inhibit = on; }
 
 drive_state_t drive_state(void) {
     taskENTER_CRITICAL(&s_lock);

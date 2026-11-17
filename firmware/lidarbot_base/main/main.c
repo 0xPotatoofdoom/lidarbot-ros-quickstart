@@ -45,6 +45,7 @@
 #include <rclc/rclc.h>
 #include <rmw_microros/rmw_microros.h>
 #include <sensor_msgs/msg/battery_state.h>
+#include "battery_guard.h"
 #include <sensor_msgs/msg/imu.h>
 #include <sensor_msgs/msg/laser_scan.h>
 #include <std_msgs/msg/float32.h>
@@ -72,6 +73,7 @@ static double s_adc_v;
 static bool s_has_ina;
 static volatile bool s_ros_up;
 static uint32_t s_pub_fail;   // failed publishes, logged with the status
+static volatile batt_state_t s_batt_state = BATT_NO_PACK;   // for the OLED and log
 static double s_pan = 0, s_tilt = -40;      // -40 = camera level (measured 2026-11-12)
 
 // ---------- outputs ----------
@@ -135,10 +137,30 @@ static double battery_adc(void) {
     return mv / 1000.0 * 4.03;   // divider from Yahboom's sample, checked against the INA228
 }
 
+// Low-battery guard (battery_guard.c): beeps, and below the critical level stops the lidar motor
+// and the wheels. Runs here, not in the ROS task, so it works without Wi-Fi or the agent.
+static void battery_check(batt_guard_t *g, double volts, double amps, bool *loads_stopped) {
+    batt_state_t before = g->state;
+    batt_guard_update(g, volts, amps);
+    s_batt_state = g->state;
+    if (g->state != before)
+        ESP_LOGW(TAG, "battery %s -> %s (%.2f V at %.2f A, %.2f V resting)", batt_state_name(before),
+                 batt_state_name(g->state), volts, amps, g->rest_v);
+    if (g->beep) beep(g->beep_ms);
+    if (g->stop_loads != *loads_stopped) {
+        *loads_stopped = g->stop_loads;
+        drive_inhibit(g->stop_loads);
+        lidar_motor(!g->stop_loads);
+    }
+}
+
 static void sensor_task(void *arg) {
     bool imu = (bool)(intptr_t)arg;
     TickType_t last = xTaskGetTickCount();
     int64_t prev = esp_timer_get_time(), next_power = 0;
+    batt_guard_t batt;
+    batt_guard_init(&batt);
+    bool loads_stopped = false;
     for (;;) {
         int64_t now = esp_timer_get_time();
         if (imu) {
@@ -160,6 +182,7 @@ static void sensor_task(void *arg) {
             s_power_ok = ok;
             s_adc_v = adc;
             taskEXIT_CRITICAL(&s_lock);
+            battery_check(&batt, ok ? p.bus_v : adc, ok ? p.current_a : 0.0, &loads_stopped);
         }
         vTaskDelayUntil(&last, pdMS_TO_TICKS(1000 / IMU_HZ));
     }
@@ -180,7 +203,9 @@ static void status_task(void *arg) {
         taskEXIT_CRITICAL(&s_lock);
         if (pok) snprintf(top, sizeof top, "%.2fV %.2fA", p.bus_v, p.current_a);
         else snprintf(top, sizeof top, "%.2fV", adc);
-        if (s_ros_up) snprintf(bottom, sizeof bottom, "ROS OK %.1fW", pok ? p.power_w : 0.0);
+        if (s_batt_state == BATT_CRITICAL) snprintf(bottom, sizeof bottom, "BATT CRITICAL");
+        else if (s_batt_state == BATT_LOW) snprintf(bottom, sizeof bottom, "BATT LOW");
+        else if (s_ros_up) snprintf(bottom, sizeof bottom, "ROS OK %.1fW", pok ? p.power_w : 0.0);
         else if (net_wifi_up()) snprintf(bottom, sizeof bottom, "AGENT...");
         else snprintf(bottom, sizeof bottom, "WIFI...");
         oled_lines(top, bottom);
