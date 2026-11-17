@@ -166,6 +166,7 @@ def main() -> int:
     ap.add_argument("--rate", type=float, default=2.0)
     ap.add_argument("--params", help="Nav2 params file (default: config/nav2_$ROS_DISTRO.yaml or nav2.yaml)")
     ap.add_argument("--nav", action="store_true", help="full Nav2 bringup, not just localization")
+    ap.add_argument("--launch", help="own Nav2 launch file instead of nav2_bringup (e.g. onboard/launch/nav_pi.launch.py)")
     ap.add_argument("--separate", action="store_true",
                     help="one process per Nav2 node (use_composition:=False), to see each node's CPU")
     args = ap.parse_args()
@@ -179,18 +180,21 @@ def main() -> int:
     duration = float(subprocess.run(["ros2", "bag", "info", str(bag)], capture_output=True, text=True,
                                     check=True).stdout.split("Duration:")[1].split("s")[0])
 
-    launch_file = "bringup_launch.py" if args.nav else "localization_launch.py"
-    launch_log = Path("/tmp/replay_nav2.log" if args.nav else "/tmp/replay_localization.log")
+    full_nav = args.nav or bool(args.launch)
+    launch_file = args.launch or ("bringup_launch.py" if args.nav else "localization_launch.py")
+    launch_log = Path("/tmp/replay_nav2.log" if full_nav else "/tmp/replay_localization.log")
     nav2 = ["ros2", "launch", "nav2_bringup", launch_file, f"map:={MAP_YAML}",
             f"params_file:={params}", "use_sim_time:=True", "autostart:=True"]
     if args.separate:
         nav2.append("use_composition:=False")
+    if args.launch:
+        nav2 = ["ros2", "launch", args.launch, f"map:={MAP_YAML}", f"params_file:={params}", "use_sim_time:=True"]
     play = ["ros2", "bag", "play", str(bag), "--clock", "--rate", str(args.rate),
             "--topics", "/scan", "/tf", "/tf_static", "/odom", "--remap", "/tf:=/tf_bag"]
     # Localization only: start AMCL first so it sees the first scans. Full Nav2: start the bag
     # first, because Jazzy's costmaps give up if odom->base_footprint isn't there within their
     # transform timeout (on the robot it always is).
-    order = [(play, Path("/tmp/replay_bag.log")), (nav2, launch_log)] if args.nav else \
+    order = [(play, Path("/tmp/replay_bag.log")), (nav2, launch_log)] if full_nav else \
             [(nav2, launch_log), (play, Path("/tmp/replay_bag.log"))]
     procs = []
     for cmd, log_path in order:
@@ -198,7 +202,7 @@ def main() -> int:
                                       start_new_session=True))
         time.sleep(6.0 if cmd is nav2 else 1.0)
     try:
-        rows = run_compare(Path(args.out), wall_limit_s=duration / args.rate + 60, seed=args.nav)
+        rows = run_compare(Path(args.out), wall_limit_s=duration / args.rate + 60, seed=full_nav)
     finally:
         for p in procs:
             try:
