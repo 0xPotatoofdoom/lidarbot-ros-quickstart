@@ -1,6 +1,7 @@
 // Host test for main/battery_guard.c (no ESP-IDF needed):
 //   cc -std=c11 -Wall -Wextra -fsanitize=address,undefined -I main test/test_battery_guard.c main/battery_guard.c -o /tmp/tbg && /tmp/tbg
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include "battery_guard.h"
 
@@ -77,6 +78,26 @@ int main(void) {
     assert(batt_parse_cmd("hello", &v) == BATT_CMD_NONE);
     assert(batt_parse_cmd("", &v) == BATT_CMD_NONE);
     assert(v == -1);
+
+    // Main switch from the switched rail.
+    rail_t r;
+    rail_init(&r);
+    assert(r.on);
+    rail_update(&r, 11.5);
+    assert(r.on);
+    for (int i = 0; i < RAIL_OFF_TICKS - 1; i++) rail_update(&r, 0.4);
+    assert(r.on);                                  // a short dip isn't a switch-off
+    rail_update(&r, 11.5);
+    for (int i = 0; i < RAIL_OFF_TICKS - 1; i++) rail_update(&r, 0.4);
+    assert(r.on);                                  // the count restarted
+    rail_update(&r, 0.4);
+    assert(!r.on);                                 // 1 s low: off
+    rail_update(&r, 7.0);
+    assert(!r.on);                                 // between the thresholds: stays off
+    rail_update(&r, 11.4);
+    assert(r.on);                                  // switched back on
+    rail_update(&r, NAN);
+    assert(r.on && r.low_ticks == 0);              // no ADC reading: never stops anything
 
     puts("battery_guard: all checks passed");
     return 0;

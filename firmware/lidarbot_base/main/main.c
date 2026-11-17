@@ -145,8 +145,25 @@ static double battery_adc(void) {
 }
 
 // Low-battery guard (battery_guard.c): beeps, and below the critical level stops the lidar motor
-// and the wheels. Runs here, not in the ROS task, so it works without Wi-Fi or the agent.
-static void battery_check(batt_guard_t *g, double volts, double amps, bool *loads_stopped) {
+// and the wheels. The same loads stop while the main switch is off (rail_t). Runs here, not in
+// the ROS task, so it works without Wi-Fi or the agent.
+static volatile bool s_rail_on = true;
+
+static void apply_loads(bool stop, bool *loads_stopped) {
+    if (stop == *loads_stopped) return;
+    *loads_stopped = stop;
+    drive_inhibit(stop);
+    lidar_motor(!stop);
+}
+
+static void rail_check(rail_t *r, double adc_v) {
+    bool before = r->on;
+    rail_update(r, adc_v);
+    s_rail_on = r->on;
+    if (r->on != before) ESP_LOGW(TAG, "main switch %s (rail %.2f V)", r->on ? "on" : "off", adc_v);
+}
+
+static void battery_check(batt_guard_t *g, double volts, double amps) {
     batt_state_t before = g->state;
     batt_guard_update(g, volts, amps);
     s_batt_state = g->state;
@@ -154,11 +171,6 @@ static void battery_check(batt_guard_t *g, double volts, double amps, bool *load
         ESP_LOGW(TAG, "battery %s -> %s (%.2f V at %.2f A, %.2f V resting)", batt_state_name(before),
                  batt_state_name(g->state), volts, amps, g->rest_v);
     if (g->beep) beep(g->beep_ms);
-    if (g->stop_loads != *loads_stopped) {
-        *loads_stopped = g->stop_loads;
-        drive_inhibit(g->stop_loads);
-        lidar_motor(!g->stop_loads);
-    }
 }
 
 // ---------- battery test mode: "batt sim <volts>" / "batt sim off" on the serial console ----------
@@ -238,6 +250,8 @@ static void sensor_task(void *arg) {
     int64_t prev = esp_timer_get_time(), next_power = 0;
     batt_guard_t batt;
     batt_guard_init(&batt);
+    rail_t rail;
+    rail_init(&rail);
     bool loads_stopped = false;
     for (;;) {
         int64_t now = esp_timer_get_time();
@@ -261,8 +275,10 @@ static void sensor_task(void *arg) {
             s_adc_v = adc;
             taskEXIT_CRITICAL(&s_lock);
             double sim;
-            if (sim_volts(&sim)) battery_check(&batt, sim, 0.0, &loads_stopped);
-            else battery_check(&batt, ok ? p.bus_v : adc, ok ? p.current_a : 0.0, &loads_stopped);
+            if (sim_volts(&sim)) battery_check(&batt, sim, 0.0);
+            else battery_check(&batt, ok ? p.bus_v : adc, ok ? p.current_a : 0.0);
+            rail_check(&rail, adc);
+            apply_loads(batt.stop_loads || !rail.on, &loads_stopped);
         }
         vTaskDelayUntil(&last, pdMS_TO_TICKS(1000 / IMU_HZ));
     }
@@ -285,7 +301,8 @@ static void status_task(void *arg) {
         if (sim_volts(&sim)) snprintf(top, sizeof top, "SIM %.2fV", sim);
         else if (pok) snprintf(top, sizeof top, "%.2fV %.2fA", p.bus_v, p.current_a);
         else snprintf(top, sizeof top, "%.2fV", adc);
-        if (s_batt_state == BATT_CRITICAL) snprintf(bottom, sizeof bottom, "BATT CRITICAL");
+        if (!s_rail_on) snprintf(bottom, sizeof bottom, "SWITCH OFF");
+        else if (s_batt_state == BATT_CRITICAL) snprintf(bottom, sizeof bottom, "BATT CRITICAL");
         else if (s_batt_state == BATT_LOW) snprintf(bottom, sizeof bottom, "BATT LOW");
         else if (s_ros_up) snprintf(bottom, sizeof bottom, "ROS OK %.1fW", pok ? p.power_w : 0.0);
         else if (s_transport == TRANSPORT_SERIAL) snprintf(bottom, sizeof bottom, "AGENT USB...");
@@ -317,7 +334,8 @@ static rcl_init_options_t s_init_opts;
 static rclc_support_t s_support;
 static rcl_node_t s_node;
 static rclc_executor_t s_exec;
-static rcl_publisher_t s_pub_imu, s_pub_battery, s_pub_power, s_pub_used, s_pub_odom, s_pub_scan, s_pub_ptz, s_pub_guard;
+static rcl_publisher_t s_pub_imu, s_pub_battery, s_pub_power, s_pub_used, s_pub_odom, s_pub_scan, s_pub_ptz, s_pub_guard,
+    s_pub_rail;
 static rcl_subscription_t s_sub_cmd, s_sub_ptz, s_sub_beep, s_sub_sim;
 static sensor_msgs__msg__Imu s_imu_msg;
 static sensor_msgs__msg__BatteryState s_power_msg;
@@ -346,6 +364,7 @@ static void on_cmd_vel(const void *m) {
 
 static void on_ptz(const void *m) {
     const geometry_msgs__msg__Vector3 *v = m;
+    if (!s_rail_on) return;   // switched off: servo current would come through the Pi's USB port
     s_pan = fmax(-90.0, fmin(90.0, v->x));
     s_tilt = fmax(-90.0, fmin(TILT_MAX, v->y));
     servo_set(4, s_pan);
@@ -366,7 +385,7 @@ static bool ros_create(void) {
     memset(&s_support, 0, sizeof s_support);
     s_node = rcl_get_zero_initialized_node();
     rcl_publisher_t *pubs[] = {&s_pub_imu, &s_pub_battery, &s_pub_power, &s_pub_used, &s_pub_odom, &s_pub_scan, &s_pub_ptz,
-                              &s_pub_guard};
+                              &s_pub_guard, &s_pub_rail};
     for (size_t i = 0; i < sizeof pubs / sizeof pubs[0]; i++) *pubs[i] = rcl_get_zero_initialized_publisher();
     s_sub_cmd = rcl_get_zero_initialized_subscription();
     s_sub_ptz = rcl_get_zero_initialized_subscription();
@@ -393,6 +412,8 @@ static bool ros_create(void) {
     CHECK(rclc_publisher_init_best_effort(&s_pub_used, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), "power_used_wh"));
     // Battery guard state (batt_state_t: 0 no pack, 1 OK, 2 LOW, 3 CRITICAL), with /power.
     CHECK(rclc_publisher_init_best_effort(&s_pub_guard, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt8), "battery_guard"));
+    // The switched rail (board battery sense): about pack volts with the main switch on, low when off.
+    CHECK(rclc_publisher_init_best_effort(&s_pub_rail, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, Float32), "rail_voltage"));
     // Best-effort subscriptions match both reliable and best-effort publishers.
     CHECK(rclc_subscription_init_best_effort(&s_sub_cmd, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Twist), "cmd_vel"));
     CHECK(rclc_subscription_init_best_effort(&s_sub_ptz, &s_node, ROSIDL_GET_MSG_TYPE_SUPPORT(geometry_msgs, msg, Vector3), "cmd_ptz_angle"));
@@ -418,7 +439,7 @@ static void ros_destroy(void) {
     DISCARD(rcl_subscription_fini(&s_sub_beep, &s_node));
     DISCARD(rcl_subscription_fini(&s_sub_sim, &s_node));
     rcl_publisher_t *pubs[] = {&s_pub_imu, &s_pub_battery, &s_pub_power, &s_pub_used, &s_pub_odom, &s_pub_scan, &s_pub_ptz,
-                              &s_pub_guard};
+                              &s_pub_guard, &s_pub_rail};
     for (size_t i = 0; i < sizeof pubs / sizeof pubs[0]; i++) DISCARD(rcl_publisher_fini(pubs[i], &s_node));
     DISCARD(rcl_node_fini(&s_node));
     DISCARD(rclc_support_fini(&s_support));
@@ -518,6 +539,8 @@ static void publish_power(void) {
     if (rcl_publish(&s_pub_battery, &s_f32, NULL) != RCL_RET_OK) s_pub_fail++;
     s_guard_msg.data = (uint8_t)s_batt_state;
     if (rcl_publish(&s_pub_guard, &s_guard_msg, NULL) != RCL_RET_OK) s_pub_fail++;
+    s_f32.data = adc;
+    if (rcl_publish(&s_pub_rail, &s_f32, NULL) != RCL_RET_OK) s_pub_fail++;
     if (!pok) return;
     stamp(&s_power_msg.header.stamp);
     s_power_msg.voltage = p.bus_v;

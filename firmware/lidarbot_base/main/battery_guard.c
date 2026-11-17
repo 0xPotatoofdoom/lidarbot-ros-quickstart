@@ -87,3 +87,15 @@ batt_cmd_t batt_parse_cmd(const char *line, double *volts) {
     *volts = v;
     return BATT_CMD_SIM;
 }
+
+void rail_init(rail_t *r) {
+    r->on = true;
+    r->low_ticks = 0;
+}
+
+void rail_update(rail_t *r, double volts) {
+    if (!(volts < RAIL_OFF_V)) r->low_ticks = 0;   // NaN (no reading) counts as on
+    else if (r->low_ticks < RAIL_OFF_TICKS) r->low_ticks++;
+    if (r->low_ticks >= RAIL_OFF_TICKS) r->on = false;
+    else if (volts > RAIL_ON_V) r->on = true;
+}

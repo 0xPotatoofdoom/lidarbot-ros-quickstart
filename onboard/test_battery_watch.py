@@ -1,5 +1,6 @@
 """Tests for battery_watch.py: python -m pytest onboard/test_battery_watch.py"""
-from battery_watch import HALT_AFTER_S, STALE_S, Reading, Watch, guard_reading, parse, should_halt, step
+from battery_watch import (HALT_AFTER_S, STALE_S, SWITCH_HALT_S, Rail, Reading, Watch, guard_reading, parse,
+                           rail_should_halt, rail_step, rover_gone, should_halt, step)
 
 STATUS = "I (123) main: {top} | {bottom} | wifi -60 dBm | ros up, 0 failed publishes | wheels 0.00 0.00 m/s"
 
@@ -65,3 +66,35 @@ def test_guard_states_from_ros():
     assert guard_reading(1, 12.1, None).state == "OK"
     assert guard_reading(0, 0.0, None).state == "NO PACK"
     assert guard_reading(9, 12.0, None) is None
+
+
+def rail_run(volts_dt):
+    r, t = Rail(), 0.0
+    for v, dt in volts_dt:
+        t += dt
+        r = rail_step(r, v, t)
+    return r, t
+
+
+def test_switch_off_halts_after_30_s():
+    r, t = rail_run([(11.5, 0)] + [(0.3, 0.2)] * int(SWITCH_HALT_S / 0.2))
+    assert not rail_should_halt(r, t)                  # 29.8 s since the first low reading
+    r = rail_step(r, 0.3, t + 0.4)
+    assert rail_should_halt(r, t + 0.4)
+
+
+def test_switch_back_on_cancels():
+    r, t = rail_run([(0.3, 0.2)] * 100 + [(11.4, 0.2)])
+    assert r.off_since is None and not rail_should_halt(r, t + 60)
+
+
+def test_silent_rail_never_halts():
+    r, t = rail_run([(0.3, 0.2)] * 10)
+    assert not rail_should_halt(r, t + SWITCH_HALT_S + STALE_S + 1)   # stale: no halt
+
+
+def test_rover_gone_only_while_the_stack_runs():
+    assert rover_gone(100.0, 131.0, stack_running=True)
+    assert not rover_gone(100.0, 129.0, stack_running=True)
+    assert not rover_gone(100.0, 500.0, stack_running=False)   # stopped to flash the board
+    assert not rover_gone(None, 500.0, stack_running=True)      # never heard: board not up yet

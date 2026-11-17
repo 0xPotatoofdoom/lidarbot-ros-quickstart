@@ -39,3 +39,17 @@ typedef enum { BATT_CMD_NONE, BATT_CMD_SIM, BATT_CMD_SIM_OFF } batt_cmd_t;
 #define BATT_SIM_MAX_V 15.0
 // Parses one console line; on BATT_CMD_SIM sets *volts. Anything else is BATT_CMD_NONE.
 batt_cmd_t batt_parse_cmd(const char *line, double *volts);
+
+// Main switch, from the board's own battery sense (GPIO3, Yahboom's divider), which reads the
+// switched rail. With the Orange Pi powered from the pack, the board stays alive through the Pi's
+// USB with the switch off, and the motors would still turn (at half speed, through the Pi's USB
+// port): below RAIL_OFF_V for RAIL_OFF_TICKS the loads stop. On USB power alone it reads low too.
+typedef struct {
+    bool on;
+    int low_ticks;
+} rail_t;
+#define RAIL_OFF_V 6.0
+#define RAIL_ON_V 8.0
+#define RAIL_OFF_TICKS 5      // 1 s at 5 Hz: a motor start can't trip it
+void rail_init(rail_t *r);      // starts on, so a board that boots with the switch on runs at once
+void rail_update(rail_t *r, double volts);

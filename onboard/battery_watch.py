@@ -78,6 +78,43 @@ def step(w: Watch, r: Reading, now: float) -> Watch:
     return Watch(r.state, since, now)
 
 
+SWITCH_HALT_S = 30.0    # main switch off this long before halting (ROS source only)
+RAIL_OFF_V = 6.0        # /rail_voltage below this: switch off (RAIL_OFF_V in the firmware)
+
+
+@dataclass(frozen=True)
+class Rail:
+    off_since: float | None = None
+    last_seen: float | None = None
+
+
+def rail_step(r: Rail, volts: float, now: float) -> Rail:
+    """The Pi runs from the pack, not the switched rail: switching the rover off leaves it on."""
+    if not volts < RAIL_OFF_V:
+        return Rail(None, now)
+    fresh = r.last_seen is not None and now - r.last_seen <= STALE_S
+    return Rail(r.off_since if (r.off_since is not None and fresh) else now, now)
+
+
+def rail_should_halt(r: Rail, now: float) -> bool:
+    return (r.off_since is not None and r.last_seen is not None
+            and now - r.last_seen <= STALE_S and now - r.off_since >= SWITCH_HALT_S)
+
+
+SILENT_HALT_S = 30.0    # rover board silent this long (switched off, USB 5 V blocked) before halting
+
+
+def rover_gone(last_seen: float | None, now: float, stack_running: bool) -> bool:
+    """With the cable's 5 V blocked, switching off powers the board down and its topics stop.
+    Only while the stack runs: stopping it (to flash the board) also silences the topics."""
+    return stack_running and last_seen is not None and now - last_seen >= SILENT_HALT_S
+
+
+def stack_running() -> bool:
+    r = subprocess.run(["systemctl", "is-active", "--quiet", "rover-stack"], check=False)
+    return r.returncode == 0
+
+
 def should_halt(w: Watch, now: float) -> bool:
     return (w.critical_since is not None and w.last_seen is not None
             and now - w.last_seen <= STALE_S and now - w.critical_since >= HALT_AFTER_S)
@@ -157,8 +194,8 @@ def guard_reading(state: int, volts: float, amps: float | None) -> Reading | Non
     return Reading(name, volts, amps) if name else None
 
 
-def halt(dry_run: bool) -> bool:
-    log(f"battery critical for {HALT_AFTER_S:.0f} s: halting")
+def halt(dry_run: bool, why: str = f"battery critical for {HALT_AFTER_S:.0f} s") -> bool:
+    log(f"{why}: halting")
     if dry_run:
         return False
     # The service runs as the ROS user (DDS between root and user processes didn't connect), with a
@@ -173,17 +210,26 @@ def run_ros(dry_run: bool) -> None:
     from rclpy.executors import ExternalShutdownException
     from rclpy.qos import QoSProfile, ReliabilityPolicy
     from sensor_msgs.msg import BatteryState
-    from std_msgs.msg import UInt8
+    from std_msgs.msg import Float32, UInt8
 
     rclpy.init()
     node = rclpy.create_node("battery_watch")
     qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)   # the firmware's
-    state = {"watch": Watch(), "volts": 0.0, "amps": None, "summary": 0.0, "done": False}
+    state = {"watch": Watch(), "rail": Rail(), "volts": 0.0, "amps": None, "summary": 0.0, "done": False,
+             "heard": None}
+
+    def on_rail(msg: Float32) -> None:
+        before = state["rail"].off_since is not None
+        state["rail"] = rail_step(state["rail"], msg.data, time.monotonic())
+        after = state["rail"].off_since is not None
+        if after != before:
+            log(f"main switch {'off' if after else 'on'} (rail {msg.data:.2f} V)")
 
     def on_power(msg: BatteryState) -> None:
         state["volts"], state["amps"] = msg.voltage, -msg.current     # BatteryState: negative out
 
     def on_guard(msg: UInt8) -> None:
+        state["heard"] = time.monotonic()
         r = guard_reading(msg.data, state["volts"], state["amps"])
         if r is None:
             return
@@ -195,14 +241,22 @@ def run_ros(dry_run: bool) -> None:
             state["summary"] = now
 
     def check() -> None:
-        if should_halt(state["watch"], time.monotonic()):
+        now = time.monotonic()
+        if should_halt(state["watch"], now):
             state["done"] = halt(dry_run)
             state["watch"] = Watch()
+        elif rail_should_halt(state["rail"], now):
+            state["done"] = halt(dry_run, f"main switch off for {SWITCH_HALT_S:.0f} s")
+            state["rail"] = Rail()
+        elif rover_gone(state["heard"], now, stack_running()):
+            state["done"] = halt(dry_run, f"rover board silent for {SILENT_HALT_S:.0f} s")
+            state["heard"] = None
 
     node.create_subscription(BatteryState, "/power", on_power, qos)
     node.create_subscription(UInt8, "/battery_guard", on_guard, qos)
+    node.create_subscription(Float32, "/rail_voltage", on_rail, qos)
     node.create_timer(1.0, check)
-    log("watching /battery_guard")
+    log("watching /battery_guard and /rail_voltage")
     try:
         while rclpy.ok() and not state["done"]:
             rclpy.spin_once(node, timeout_sec=1.0)
