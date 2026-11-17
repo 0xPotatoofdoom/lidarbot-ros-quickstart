@@ -296,5 +296,13 @@ The battery watch halts the Pi when:
 | `/rail_voltage` under 6 V (main switch off) | 30 s |
 | no `/battery_guard` at all while `rover-stack` runs (a cable with its 5 V blocked: the board really powers down) | 30 s |
 
+Each halt is also written to `~/lidarbot/data/halts.log` on the SD card, with its reason: this
+image keeps the journal and `/var/log` in RAM (zram), so the journal of the boot before is gone.
+The Pi has no clock battery either, so a boot starts at the last saved time until NTP syncs.
+
+The rover's USB cable must go in the Pi's USB-C **host** port. In the other one (the power/OTG
+port) the board never shows up (no `/dev/ttyUSB0`, `lsusb` lists only the root hubs, the boot log
+says "Hardware activated USB gadget"), and the OLED stays on "AGENT USB...".
+
 A halted Pi stays on the converter until its power is cut: unplug the pigtail or add an inline
 switch, or the halted Pi and the converter keep drawing from the pack with nothing watching.

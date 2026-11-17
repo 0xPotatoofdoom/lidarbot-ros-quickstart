@@ -194,8 +194,23 @@ def guard_reading(state: int, volts: float, amps: float | None) -> Reading | Non
     return Reading(name, volts, amps) if name else None
 
 
+HALT_LOG = os.environ.get("BATTERY_WATCH_HALT_LOG", os.path.expanduser("~/lidarbot/data/halts.log"))
+
+
+def record_halt(why: str, dry_run: bool) -> None:
+    """The journal lives in RAM on this image, so a halt's reason would be gone after the reboot."""
+    try:
+        with open(HALT_LOG, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S %Z')} {why}{' (dry run)' if dry_run else ''}\n")
+            f.flush()
+            os.fsync(f.fileno())
+    except OSError as e:
+        log(f"could not write {HALT_LOG}: {e.strerror}")
+
+
 def halt(dry_run: bool, why: str = f"battery critical for {HALT_AFTER_S:.0f} s") -> bool:
     log(f"{why}: halting")
+    record_halt(why, dry_run)
     if dry_run:
         return False
     # The service runs as the ROS user (DDS between root and user processes didn't connect), with a
