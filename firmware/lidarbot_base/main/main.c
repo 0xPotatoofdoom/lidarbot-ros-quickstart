@@ -289,7 +289,7 @@ static void status_task(void *arg) {
         else if (s_batt_state == BATT_LOW) snprintf(bottom, sizeof bottom, "BATT LOW");
         else if (s_ros_up) snprintf(bottom, sizeof bottom, "ROS OK %.1fW", pok ? p.power_w : 0.0);
         else if (s_transport == TRANSPORT_SERIAL) snprintf(bottom, sizeof bottom, "AGENT USB...");
-        else if (net_wifi_up()) snprintf(bottom, sizeof bottom, "AGENT...");
+        else if (net_wifi_up()) snprintf(bottom, sizeof bottom, "AGENT WIFI...");
         else snprintf(bottom, sizeof bottom, "WIFI...");
         oled_lines(top, bottom);
         if (i % 20 == 0) {

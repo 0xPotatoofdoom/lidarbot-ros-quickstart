@@ -1,0 +1,22 @@
+# The rover's ROS stack on the Pi at boot (onboard/rover-up.sh). Launch arguments come from
+# /etc/default/rover-stack, e.g.  ROVER_ARGS="agent_transport:=serial nav:=true"
+# Install: sudo install -m 644 rover-stack.service /etc/systemd/system/ && sudo systemctl enable --now rover-stack
+# Flashing the board needs the port: sudo systemctl stop rover-stack first.
+[Unit]
+Description=Rover ROS stack (micro-ROS agent, EKF, Nav2, Foxglove)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=orangepi
+Environment=HOME=/home/orangepi ROVER_ARGS=agent_transport:=serial
+EnvironmentFile=-/etc/default/rover-stack
+# ROVER_ARGS unquoted on purpose: one word per launch argument.
+ExecStart=/bin/bash -c 'exec /home/orangepi/lidarbot/onboard/rover-up.sh $ROVER_ARGS'
+KillSignal=SIGINT
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

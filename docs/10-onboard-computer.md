@@ -238,6 +238,10 @@ onboard/rover-up.sh agent_transport:=tcp4 agent_port:=8888 nav:=true   # behind 
 onboard/rover-up.sh nav:=true                                          # rover sends UDP 8090 straight to the Pi
 ```
 
+At boot, `onboard/rover-stack.service` starts it (as `orangepi`, arguments from
+`/etc/default/rover-stack`, here `ROVER_ARGS="agent_transport:=serial nav:=true"`). Stop it
+before flashing the board: `sudo systemctl stop rover-stack`.
+
 The rover talks to the Pi over the USB cable (firmware `transport serial`, see
 `firmware/lidarbot_base/README.md`): `onboard/rover-up.sh agent_transport:=serial nav:=true`.
 Over Wi-Fi instead, either `agent <pi-ip> 8090` on the firmware console with the default
